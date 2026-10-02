@@ -1,0 +1,5 @@
+- **Quartus Engineering / Software Engineer I - 103QE** — applicationId `d36dc42f-80e1-44db-9f01-07bd44e71ed6`, folder `wideapply-campaign/2c7e1903-26cc-4641-92fc-313cdf49e496-2026-10-02/quartus-engineering-software-engineer-i-103qe`
+- **Suno / Machine Learning Engineer - Content Discovery** — applicationId `6af0fc93-f1c9-48aa-934c-2d4c41f75677`, folder `wideapply-campaign/2c7e1903-26cc-4641-92fc-313cdf49e496-2026-10-02/suno-machine-learning-engineer-content-discovery`
+- **Parallel Systems / Full Stack Software Engineer** — applicationId `bfb9d8cd-950e-4966-afa6-ee3fd301830f`, folder `wideapply-campaign/2c7e1903-26cc-4641-92fc-313cdf49e496-2026-10-02/parallel-systems-full-stack-software-engineer`
+- **Cardless / Software Engineer (Backend)** — applicationId `f0de9856-c611-4c67-b585-f7c18473af39`, folder `wideapply-campaign/2c7e1903-26cc-4641-92fc-313cdf49e496-2026-10-02/cardless-software-engineer-backend`
+- **Hasbro, Inc. / Senior AI Platform Engineer** — applicationId `bddeffc1-e5a2-4a2c-871f-ab21867b9989`, folder `wideapply-campaign/2c7e1903-26cc-4641-92fc-313cdf49e496-2026-10-02/hasbro-inc-senior-ai-platform-engineer`

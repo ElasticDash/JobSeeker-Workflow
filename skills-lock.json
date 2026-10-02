@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "gws-drive-upload": {
+      "source": "googleworkspace/cli",
+      "sourceType": "github",
+      "skillPath": "skills/gws-drive-upload/SKILL.md",
+      "computedHash": "0a5cb1978c1eb483bb223363a316dc6a73998b4158c0f4ebcf18882155a57bc8"
+    }
+  }
+}
