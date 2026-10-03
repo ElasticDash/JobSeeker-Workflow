@@ -13,6 +13,8 @@ A wideapply application can carry two separate files for one resume, each with a
 
 Each upload replaces only a prior document of the *same kind* — a `cv` upload never touches `cv_source` and vice versa, so re-running this with just a new PDF doesn't drop the admin's `.docx`, and vice versa (see `applicationDocumentController.js`).
 
+**This does not parse the resume for email outreach.** Everything here writes to `wideapply.ApplicationDocuments` (per-application files, no text-extraction step at all) — a completely separate store from the candidate-scoped `wideapply.Resumes.raw_text` that `convert-wideapply-lead-to-email` requires. If this candidate's email outreach is planned, also run `push-wideapply-resume` once per candidate (not per application) with the `.docx` — it's the fix for that skill's "candidate has no parsed resume yet" 400.
+
 This skill writes all of the above, by running `push-document.mjs` in this skill's own folder, which uploads once per file given and reuses the results. The script — not you — holds the auth key and makes the HTTP calls; you only ever build the arguments and invoke it.
 
 **This replaced a Google Drive + base64 step that kept failing in practice** (a reproducible integrity-check failure on one resume, a font-stripped workaround needed on another — see this skill's git history / `08_drive.md` from runs before 2026-10-02). The fix was to stop using Drive for this at all, not to retry the base64 path harder.

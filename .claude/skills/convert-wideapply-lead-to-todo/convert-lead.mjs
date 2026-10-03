@@ -2,7 +2,7 @@
 // convert-lead.mjs
 //
 // Usage:
-//   node convert-lead.mjs --env dev|prod --campaign <campaignId> --lead <leadId> [--application <applicationId>] [--admin-ed-user-id <id>]
+//   node convert-lead.mjs --env dev|prod --campaign <campaignId> --lead <leadId> [--application <applicationId>] [--message <text>] [--follow-up-message <text>] [--admin-ed-user-id <id>]
 //
 // Converts one already-inserted wideapply.Leads row into a
 // linkedin_connection to-do (POST .../leads/:leadId/convert) - the backend
@@ -10,6 +10,22 @@
 // automatically (see createWideapplyTodo in adminController.js). One lead
 // per call; loop this script per lead id when converting a batch (e.g.
 // every id push-leads.mjs just returned).
+//
+// --message is optional: a pre-drafted LinkedIn connect note for this lead
+// (sent WITH the connection request), saved as the to-do's content
+// immediately. --follow-up-message is optional too: a pre-drafted private
+// message for the chain's own "send a message" step (sent AFTER the
+// connection is accepted - a different moment, so usually different
+// wording than --message). Quote both (shell arguments, not stdin) since
+// they're free text. Omit either to leave that step's content empty, same
+// as before these flags existed. This script never checks whether the
+// invite was actually accepted - that's still the chain's own day-3/day-6
+// check, same as before.
+//
+// Converting a lead here does not block also converting it to an email
+// sequence (convert-wideapply-lead-to-email) - the two are tracked
+// independently (wideapply.Leads.converted_todo_item_id vs.
+// converted_email_sequence_id, migration 066).
 //
 // Reads ELASTICDASH_BE_BASE_URL, WIDEAPPLY_LEAD_CONVERT_SERVICE_KEY and the
 // optional WIDEAPPLY_ADMIN_ED_USER_ID from
@@ -34,6 +50,8 @@ function parseArgs(argv) {
         else if (argv[i] === '--campaign') args.campaign = argv[++i];
         else if (argv[i] === '--lead') args.lead = argv[++i];
         else if (argv[i] === '--application') args.application = argv[++i];
+        else if (argv[i] === '--message') args.message = argv[++i];
+        else if (argv[i] === '--follow-up-message') args.followUpMessage = argv[++i];
         else if (argv[i] === '--admin-ed-user-id') args.adminEdUserId = argv[++i];
     }
     return args;
@@ -56,9 +74,9 @@ function loadEnvFile(path) {
 }
 
 async function main() {
-    const { env, campaign, lead, application, adminEdUserId } = parseArgs(process.argv.slice(2));
+    const { env, campaign, lead, application, message, followUpMessage, adminEdUserId } = parseArgs(process.argv.slice(2));
     if (!env || !['dev', 'prod'].includes(env)) {
-        console.error('Usage: node convert-lead.mjs --env dev|prod --campaign <campaignId> --lead <leadId> [--application <applicationId>] [--admin-ed-user-id <id>]');
+        console.error('Usage: node convert-lead.mjs --env dev|prod --campaign <campaignId> --lead <leadId> [--application <applicationId>] [--message <text>] [--follow-up-message <text>] [--admin-ed-user-id <id>]');
         process.exitCode = 1;
         return;
     }
@@ -101,7 +119,7 @@ async function main() {
                 'Content-Type': 'application/json',
                 Authorization: `Bearer ${key}`,
             },
-            body: JSON.stringify({ adminEdUserId: resolvedAdminEdUserId || undefined, applicationId: application || undefined }),
+            body: JSON.stringify({ adminEdUserId: resolvedAdminEdUserId || undefined, applicationId: application || undefined, message: message || undefined, followUpMessage: followUpMessage || undefined }),
         });
     } catch {
         console.error(`Could not reach ${baseUrl}. Is the ${env} backend up and is this network allowed to reach it?`);

@@ -89,7 +89,7 @@ One short paragraph. Order the preferred items by closeness to the company's cor
 
 ## House rules
 
-- **Relocation always passes the location check.** Write the location knockout as "based in X or willing to relocate".
+- **Relocation passes the location check by default, unless the candidate's own material says otherwise.** Write the location knockout as "based in X or willing to relocate". When checking a specific candidate (Follow-up section below) whose material explicitly states they are not willing to relocate, that overrides the default: a non-remote role outside their current or stated desired city/location fails this check, not passes it. A remote role always passes regardless of relocation willingness.
 - **x.5 years counts as x+1** against a minimum years requirement. State the effective threshold (e.g. "3+ years (2.5 is fine)").
 - **Stay inside the JD.** Every check traces to a JD line, the posting's application questions, or a regulated-field knockout flagged for confirmation. Do not invent requirements.
 - **Output in English**, whatever language the user or JD uses. Keep company, product and technical terms as written.
@@ -101,7 +101,7 @@ One short paragraph. Order the preferred items by closeness to the company's cor
 
 If the user supplies a CV:
 
-1. HR list: for each Skim check, quote the CV line that passes it or write "not found". List Form checks as "answer on application" unless the CV shows a problem (e.g. based abroad with no relocation signal is still a pass under the house rule; a clear visa conflict is not).
+1. HR list: for each Skim check, quote the CV line that passes it or write "not found". List Form checks as "answer on application" unless the CV shows a problem (e.g. based abroad with no relocation signal is still a pass under the house rule's default; based abroad AND the candidate's material explicitly says not willing to relocate, for a non-remote role outside their city, is a fail; a clear visa conflict is not a pass either).
 2. Hiring manager list: for each check, quote the project-level evidence or write "not found". A Skills-list mention is "not found".
 3. Verdict: **Interview-worthy** only if every HR check and every hiring manager check passes (the borderline item may be missing). Otherwise **Not yet**, naming the failed checks, HR ones first.
 4. If interview-worthy, one line on where the candidate sits in the ranking from Step 5.

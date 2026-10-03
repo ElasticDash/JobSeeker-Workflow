@@ -21,22 +21,28 @@ The user has one or more leads already saved to a campaign (via `push-wideapply-
 
 1. **`campaignId`** and **`leadId`** — the user gives you these, or they come from a prior step in this conversation (e.g. the ids `push-wideapply-leads` just inserted). Never guessed.
 2. **`applicationId`** — optional. Only needed to disambiguate when the lead's company has more than one live application under this campaign; omit it when there's just one (the common case). If omitted and the backend finds more than one match, the call fails with a 400 naming the ambiguity — pass `--application` then.
-3. **Environment** — default to `dev`. Only use `prod` if the user explicitly says "prod" or "production". Before the *first* prod write in a session, confirm explicitly with the user even if they already said prod once.
+3. **`message`** — optional. A pre-drafted LinkedIn connect note for this lead, sent WITH the connection request (your own draft, written from the lead's title/company and the target role — never a template filled in blindly). Saved as the to-do's content immediately. Omit it to leave content empty, same as this skill's behavior before this flag existed.
+4. **`followUpMessage`** — optional. A pre-drafted private message for the chain's own "Send private message to `<name>` on LinkedIn" step — sent AFTER the connection is accepted, a different moment than `message` above, so usually different wording (e.g. referencing the role/company rather than just "thanks for connecting"). Omit it to leave that step's content empty, same as before this flag existed. This does not change when the message actually goes out — the day-3/day-6 accept-check chain still controls that, same as always.
+5. **Environment** — default to `dev`. Only use `prod` if the user explicitly says "prod" or "production". Before the *first* prod write in a session, confirm explicitly with the user even if they already said prod once.
 
 ## Calling the script
 
 Run from the repo root:
 
 ```
-node .claude/skills/convert-wideapply-lead-to-todo/convert-lead.mjs --env dev --campaign <campaignId> --lead <leadId> [--application <applicationId>]
+node .claude/skills/convert-wideapply-lead-to-todo/convert-lead.mjs --env dev --campaign <campaignId> --lead <leadId> [--application <applicationId>] [--message "<drafted connect note>"] [--follow-up-message "<drafted post-accept message>"]
 ```
+
+Quote `--message` and `--follow-up-message` since they're free text that can contain spaces.
+
+Converting a lead here never blocks also converting it to an email outreach sequence (`convert-wideapply-lead-to-email`) — the two are tracked independently (`wideapply.Leads.converted_todo_item_id` vs. `converted_email_sequence_id`, migration 066). A lead can get both a LinkedIn connect-todo and an email sequence.
 
 The script prints exactly one JSON line to stdout on success — `{"ok":true,"env":...,"campaign":...,"lead":...,"todoId":...,"target":...}` (`target` is the lead's LinkedIn URL, carried onto the to-do) — and a JSON error line to stderr with a non-zero exit code on failure. Relay the result back to the user in plain language; don't just paste the raw JSON.
 
 ## If it fails
 
 - **`Lead not found on this campaign.`** — wrong `leadId`/`campaignId` pair, or the lead was deleted; tell the user, don't retry with a guessed id.
-- **`This lead has already been converted to a to-do.`** — not an error to retry around; tell the user it's already done (the original to-do still exists, this call doesn't create a second one).
+- **`This lead has already been converted to a to-do.`** — specifically the LinkedIn connect-todo path; not an error to retry around; tell the user it's already done (the original to-do still exists, this call doesn't create a second one). Doesn't mean the lead can't still be converted to an email sequence separately (`convert-wideapply-lead-to-email`) — that's a different, independent check.
 - **`Multiple applications exist for this company — pass applicationId to specify which one.`** — pass `--application` with the specific one the user means.
 - **`No live application found for this company — has it been removed?`** — the company has no live application on this campaign at all; tell the user, don't retry.
 - **`Env file not found: .secrets/wideapply-lead-convert-skill/.env.<env>`** — that environment hasn't been set up yet. Tell the user to create it (see "One-time setup" below) — you cannot create or fill in the key yourself.

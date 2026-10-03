@@ -34,12 +34,12 @@ For each lead in the source list, build an object with these fields (only `name`
 | `linkedinUrl` | full profile URL |
 | `email` | **`null` if not found — never a placeholder string like `"not found"`** |
 | `emailStatus` | one of `verified`, `unavailable`, `guessed` |
-| `tier` | one of `c_level`, `manager`, `peer` — map the source data's own labels (e.g. "C-level", "Manager", "Peer") to these exact lowercase values |
-| `source` | free text, e.g. `"Exa + TinyFish"` |
+| `tier` | one of `c_level`, `manager`, `peer`, `hr_recruiting` (migration 066 added the 4th) — map the source data's own labels (e.g. "C-level", "Manager", "Peer", "Recruiter"/"HR"/"Talent Acquisition") to these exact lowercase values |
+| `source` | free text, e.g. `"TinyFish + News"` |
 | `confidence` | one of `verified`, `likely` |
 | `notes` | free text |
 
-The backend rejects any other value for `tier`/`emailStatus`/`confidence` — if the source data uses a different label, map it to the closest of these three sets rather than passing it through as-is.
+The backend rejects any other value for `tier`/`emailStatus`/`confidence` — if the source data uses a different label, map it to the closest of these four sets rather than passing it through as-is.
 
 ## Calling the script
 

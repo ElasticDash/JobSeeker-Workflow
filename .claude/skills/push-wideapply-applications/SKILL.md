@@ -37,6 +37,8 @@ If `candidate-job-matcher` reports it fell short of N (search exhausted or hit i
 
 `candidate-job-matcher` already pulled toward N and already dropped near-duplicates and out-of-range YOE postings, so by default every row in its output table is a candidate to log — don't re-trim to some other count on top of N. The one exception: if the user reviews the table (Step 3) and wants to hand-drop a specific row (wrong company, bad fit despite passing the filters), respect that.
 
+**Relocation-based location filter.** Check the candidate profile's "Desired Job Location" / willing-to-relocate answer. If it explicitly states not willing to relocate, drop any row that is not remote, not in the candidate's current city, and not in their stated desired city/location — don't log it as "found" at all (don't count it against N; `candidate-job-matcher`'s own seen-jobs cache already marked it seen, so it won't resurface). This is strictly better than letting it through and discovering the mismatch later as an `ideal-cv-pipeline-v4` handoff inside `wideapply-campaign-pipeline` — a pure location/relocation check needs no JD analysis, so there's no reason to spend a sourcing slot on it. If the profile says nothing, or says willing to relocate, every location passes this filter (same as `candidate-job-matcher`'s and `requirement-finder`'s own relocation-passes-by-default house rule). Report any row dropped this way in the Step 3 summary, same as any other shortfall.
+
 ## Step 3: Map each match — show this table before pushing
 
 | Application field | From TheirStack result | Notes |
@@ -45,6 +47,7 @@ If `candidate-job-matcher` reports it fell short of N (search exhausted or hit i
 | `role` | `job_title` | required |
 | `status` | always `'found'` | the script defaults this, but state it explicitly in the table so the user sees what's about to be written |
 | `jobPostUrl` | `url` / `final_url` | |
+| `jobDescription` | `description`, normalized to clean markdown — see below | **required — never omit this, and the backend now enforces it too** (`createWideapplyApplication` 400s with "jobDescription is required." as of 2026-10-04 — not just a convention, a hard validation). This field was missing from this table until 2026-10-04, so earlier runs logged applications with no job description at all on the stored record — breaking anything downstream that reads it off the application row itself rather than a local JD file, e.g. `convert-wideapply-lead-to-email`'s "needs a non-empty jobDescription" prerequisite. If TheirStack's `description` is genuinely empty or null for a specific posting (rare — hasn't been observed in practice, but don't assume it never happens), `fetch_content` the job's `jobPostUrl` before logging it and use the extracted page text instead; don't log a "found" application with a blank job description when a fallback is available. |
 | `city` | `short_location` | omit if absent, don't invent a location |
 | `workMode` | derived from workplace type, if known | must be one of `onsite`, `hybrid`, `remote` — omit rather than guess if unclear |
 | `salaryRange` | `salary_string`, or built from `min_annual_salary_usd`/`max_annual_salary_usd` | omit if TheirStack has no salary data — don't fabricate a range |
@@ -52,6 +55,15 @@ If `candidate-job-matcher` reports it fell short of N (search exhausted or hit i
 | `companySize` | `company_object.employee_count`, as free text (e.g. `"501-1000"`) | optional, no fixed enum |
 | `source` | `'TheirStack'` | always set this — it becomes the auto-logged "Found on TheirStack" event on the application |
 | `notes` | optional | e.g. why this was flagged a fit, from the candidate-job-matcher output |
+
+**`jobDescription` must be clean markdown, not TheirStack's raw text verbatim.** This isn't cosmetic: the candidate-facing board renders this exact field through `react-markdown` with no raw-HTML passthrough and headings downgraded to bold paragraphs (`wideapply-dashboard`'s `JobTab.tsx` → `components/ui/Markdown.tsx`) — malformed input shows as literal asterisks, garbled line breaks, or raw escaped tags to the candidate, not a parsing error you'd catch first. TheirStack's `description` is already close to markdown (it mixes `**Bold Section**` pseudo-headers with real `#### ATX headers` and `-` bullets, inconsistently per posting) but needs normalizing before it goes in the payload:
+
+- Pick one section-header style and use it throughout — `**Bold Label**` on its own line, since that renderer downgrades real headings (`#`/`##`/`###`/`####`) to the exact same bold-paragraph weight anyway, so there's no visual reason to keep ATX syntax if the source mixed the two.
+- Normalize every bullet marker to `-`.
+- Collapse runs of 3+ blank lines down to one blank line between sections.
+- Trim trailing whitespace from line ends.
+- Strip or convert any literal HTML (rare, but some job-board-scraped postings carry it) — the renderer has no HTML passthrough, so a stray `<br>`/`<strong>`/`&nbsp;` would show to the candidate as literal text, not formatting. Convert obvious ones (`<br>` → a line break, `<strong>…</strong>` → `**…**`) or just drop the tag and keep the inner text.
+- Keep the actual content as-is otherwise — this is formatting cleanup, not rewriting or summarizing the posting.
 
 Render this as a table in your response (company / role / url / source, at minimum) and get the user's go-ahead before Step 4. Do not silently skip this even when the user asked for the "chained, automatic" version of this flow — automatic means one request triggers both steps without the user re-invoking a second skill, not that the write happens unreviewed.
 
