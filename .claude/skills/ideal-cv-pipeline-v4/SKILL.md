@@ -26,8 +26,8 @@ This runs in Claude Code locally, not claude.ai: there is no `SendUserFile`, no 
 1. **Job description** (raw text, paste, or link)
 2. **Candidate profile** (LinkedIn or WideApply export, bio, or other profile text)
 3. **Original CV template**: the candidate's .docx resume. It is both candidate material and the layout for stage 7.
-4. **Contact set 1**: a phone number and an email address (optional)
-5. **Contact set 2**: a phone number and an email address (optional)
+4. **Contact set 1**: a phone number and an email address (optional). This is an **application-submission identity**, not the candidate's own contact — see "Contact sets and output files" below for why those two are now kept on separate files.
+5. **Contact set 2**: a phone number and an email address (optional). A second application-submission identity, same purpose as set 1.
 6. **WideApply `campaignId`** (optional): the candidate's campaign in ElasticDash-BE. Needed only for stage 9's leads push. If `PUSH_LEADS` is true and this is missing, ask for it once alongside any other opening question; if the user isn't there to answer, run stage 9 as research-only (find leads, skip the push) and say why.
 
 The JD is required, and so is at least one of the candidate profile or the original CV. If either is missing, ask before starting. Two copies of the same file do not count as two inputs.
@@ -39,19 +39,24 @@ The JD is required, and so is at least one of the candidate profile or the origi
 
 ## Contact sets and output files
 
-The resume content is written once. Stage 7 turns it into one .docx per contact set, and the files differ only in phone number and email.
+The resume content is written once. Stage 7 turns it into separate .docx files that differ only in phone number and email — but the two kinds of file now serve two different audiences, and must never be confused:
+
+- **Original** (exactly one, always generated): phone and email come from the candidate's own profile (then the template as fallback) — never from a supplied contact set, even when one was given. This is the **candidate-facing** file: it gets rendered to PDF and is what the candidate sees of their own resume.
+- **Application** (one per contact set supplied, zero if none were): phone and email come from that contact set. This is the **admin-only** file: it stays a .docx, is never shown to the candidate, and is the version admin actually uses to submit the application — not the Original/candidate-facing one. Its whole purpose is to carry an application-submission identity (a tracking number, an alias inbox) that is deliberately different from the candidate's real contact info.
 
 | Contact sets supplied | .docx files |
 |---|---|
-| Two | Two, one per set |
-| One | One |
-| None | One, the "Default" set, with phone and email from the profile, then the template |
+| Two | Original, plus two Application files (one per set) |
+| One | Original, plus one Application file |
+| None | Original only — since there is no separate application identity, admin also uses this file to apply |
 
-A lone phone number or email given with no second set is set 1. If both sets resolve to the same phone and email, make one file and say so.
+A lone phone number or email given with no second set is Application set 1. If a supplied set resolves to the same phone and email as the profile's, still build it as a separate Application file and say so (the point is the file's role, not whether the digits happen to differ).
 
 **Pairing.** Values are grouped into sets as the user gave them (labelled "set 1" / "set 2", or listed as phone and email pairs). If the values do not pair clearly (e.g. two emails and one phone), ask how they pair. If the user is not there, pair them in the order given, fill the gap as below, and flag it in the reply.
 
-**Filling each set.** Within each set, each field is resolved on its own, and the first source that has it wins:
+**Filling the Original file.** Phone and email come from the candidate profile; if the profile is missing a field, fall back to the original CV template. Never pull from a supplied contact set here — a contact set is an application identity, not a candidate-contact override, and letting one leak into the Original file is exactly the mistake this section exists to prevent.
+
+**Filling each Application set.** Within each set, each field is resolved on its own, and the first source that has it wins:
 
 1. The value supplied in that set.
 2. The candidate profile.
@@ -66,7 +71,7 @@ Rules:
 - If no source has a field, leave it off that file's contact line and add "Confirm phone number" or "Confirm email address" to Needs candidate confirmation. Never invent one.
 - This section governs phone and email only. Name, links (LinkedIn, portfolio) and location follow `IDEAL_CANDIDATE`'s header rules, including its Header location rule, and are the same in every file.
 
-Save to `00_contact.md`: one block per set (Set 1, Set 2, or Default) with its phone, email and the source of each (supplied, profile, template, or none), then every other phone number and email seen in the material that no set uses. This file is the only source of phone and email for every later stage.
+Save to `00_contact.md`: a block for Original (profile/template-sourced, with each field's source) first, then one block per Application set (Set 1, Set 2) with its phone, email and the source of each (supplied, profile, template, or none), then every other phone number and email seen in the material that no file uses. This file is the only source of phone and email for every later stage.
 
 ## Working files
 
@@ -108,9 +113,9 @@ Inputs:
 - the raw candidate material, which is needed for exact employer names, dates, titles and education
 - `00_contact.md`
 
-**Override:** in the header, the phone number and email are set 1's (or Default's) from `00_contact.md`, not the candidate material's or the .docx template's. Set 2 is applied only in stage 7. The rest of the header follows `IDEAL_CANDIDATE`'s rules.
+**Override:** in the header, the phone number and email are the **Original** file's, from `00_contact.md` (profile, then template) — never a supplied contact set's, even if one was given. Every Application set's contact is swapped in only in stage 7, on its own separate file. The rest of the header follows `IDEAL_CANDIDATE`'s rules.
 
-Save the resume to `03_ideal_cv.md` and its closing lists to `05_confirmation.md`. Add any "Confirm phone number" or "Confirm email address" item from `00_contact.md` to Needs candidate confirmation, naming the set.
+Save the resume to `03_ideal_cv.md` and its closing lists to `05_confirmation.md`. Add any "Confirm phone number" or "Confirm email address" item from `00_contact.md` to Needs candidate confirmation, naming which file (Original or which Application set) it applies to.
 
 ## Stage 4: First check
 
@@ -135,7 +140,7 @@ Log the result in `04_check_log.md`.
    3. **PASS:** go to stage 5.
    4. **FAIL:** stop and hand off. Do not triage again: `AUTO_FIX_ROUNDS` is 1. Run `cv-pass-gap-triage` in mode `second` only to build the handoff package, save it to `04a_triage.md`, then hand off.
 
-No stage after stage 3 changes the phone number or email. If any edit touches the contact line, restore set 1's (or Default's) values from `00_contact.md`.
+No stage after stage 3 changes the phone number or email. If any edit touches the contact line, restore the **Original** file's values from `00_contact.md` (never an Application set's).
 
 ## Stage 5: Humanize
 
@@ -170,28 +175,30 @@ No automatic fix happens after the second check, even when triage marks a gap as
 
 ## Stage 7: Generate the files
 
-Run `cv-file-generator-2026-09-27` once per contact set in `00_contact.md`:
+Run `cv-file-generator-2026-09-27` once for the Original file and once per Application set in `00_contact.md`:
 - Template: the original CV .docx.
-- Content: the final `03_ideal_cv.md`, converted to the generator's `content.json`. The `contact` field uses that set's phone number and email; every other field is the same for every set.
+- Content: the final `03_ideal_cv.md`, converted to the generator's `content.json`. The `contact` field uses that file's own phone number and email (the Original file's own profile-sourced contact, or that Application set's); every other field is the same for every file.
 
 **Contact line.** Where the template's contact line holds an old phone or email, replace only that text and keep the template's separators, other items and formatting. If the old email is a hyperlink, change its `mailto:` target in `word/_rels/document.xml.rels` too.
 
-**Order.** Build set 1 (or Default) first and fit it to one page with the generator's trim rules, within these limits:
+**Order.** Build the **Original** file first (its contact is the profile's, never a supplied set's) and fit it to one page with the generator's trim rules, within these limits:
 - Trimming must not remove the only evidence for any check that passed at stage 6. Trim other words instead.
 - Trimming never removes the phone number or email.
 - Long-tail terms may move to Skills. Note any such move.
 
-Then build set 2 from the same trimmed content, changing only the contact line. If set 2 runs past one page (a longer contact line can wrap), trim the shared content under the same limits and rebuild both files, so the two files stay identical apart from phone and email.
+Then build each **Application** file from the same trimmed content, changing only the contact line to that set's values. If an Application file runs past one page (a longer contact line can wrap), trim the shared content under the same limits and rebuild every file, so all files stay identical apart from phone and email.
 
-**No PDF delivered.** Render each .docx to PDF in the scratchpad only, to check page count and line counts. Never send a PDF or save one as a deliverable, even when the generator produces one.
+**No PDF delivered.** Render each .docx to PDF in the scratchpad only, to check page count and line counts. Never send a PDF or save one as a deliverable, even when the generator produces one. (A real candidate-facing PDF of the Original file is generated downstream, by whichever caller attaches this resume to an application — not by this stage.)
 
 After the content is in the template, rerun the role check using the real rendered line counts.
 
-**File names.** Two sets: `First_Last_Resume_1.docx` (set 1) and `First_Last_Resume_2.docx` (set 2). One set or Default: `First_Last_Resume.docx`.
+**File names.** Original: `First_Last_Resume.docx` (always this name, candidate-facing, regardless of how many Application sets exist). One Application set: `First_Last_Resume_Apply.docx`. Two Application sets: `First_Last_Resume_Apply1.docx` and `First_Last_Resume_Apply2.docx`.
 
 **Contact check.** Before sending, search each .docx (`word/document.xml`, every `word/header*.xml` and `word/footer*.xml`, and `word/_rels/*.rels`):
-- that file's phone number and email each appear on the contact line
-- the other set's phone and email, and every unused value listed in `00_contact.md`, appear nowhere, including links
+- that file's own phone number and email each appear on the contact line
+- for the Original file: no Application set's phone or email appears anywhere, including links — the candidate must never see an application-tracking number or alias inbox on their own copy
+- for each Application file: the profile's real phone and email, and every other Application set's values, appear nowhere, including links — admin's application copy must never leak back the candidate's real contact either
+- every unused value listed in `00_contact.md` appears nowhere
 
 Fix any failure and rebuild before delivering.
 
@@ -200,11 +207,11 @@ Fix any failure and rebuild before delivering.
 Only after stage 7 passes its contact check. Run `push-resume-to-drive` on every .docx from stage 7:
 - candidate name from the header
 - company and short role label from `01_jd_eval.md` / the JD
-- the Drive name keeps the set number: `First_Last_Resume_<Company>_<RoleShort>_1.docx` and `_2`, or no number for one set or Default
+- the Drive name keeps the file's role: `First_Last_Resume_<Company>_<RoleShort>.docx` for the Original, `_Apply` (or `_Apply1`/`_Apply2` with two sets) appended for each Application file
 
 The files stay at their working-directory path regardless of the push outcome; that path is the deliverable, Drive is a copy. If the push fails its integrity check after retrying, the pipeline still counts as success: report the push status and move on. Never re-run stages 1 to 7 because of a push problem.
 
-Save the result to `08_drive.md`, one line per file: Drive name, status (`in Drive` / `updated` / `upload failed integrity check` / `not pushed`), and the Drive view link if one was confirmed. A caller chaining this pipeline (e.g. a master pipeline that attaches the resume to a specific job application afterward) reads the set-1 (or Default) file's link from here rather than re-deriving it from prose.
+Save the result to `08_drive.md`, one line per file: Drive name, status (`in Drive` / `updated` / `upload failed integrity check` / `not pushed`), and the Drive view link if one was confirmed. A caller chaining this pipeline (e.g. a master pipeline that attaches the resume to a specific job application afterward) reads whichever file's link it actually needs from here rather than re-deriving it from prose — the **Original** file's link for anything candidate-facing, the **Application** file's link (falling back to Original if no contact set was supplied) for anything admin uses to actually submit the application. Never substitute one for the other.
 
 A handoff run never reaches stage 8 or 9: nothing goes to Drive and no leads are researched until the resume passes.
 
@@ -241,11 +248,11 @@ When the pipeline stops for a human:
 Reply in the user's language. No em dashes anywhere.
 
 **On success:**
-1. The .docx files (one per contact set), each at its working-directory path, captioned with its phone and email. No PDF.
+1. The .docx files (the Original plus one per Application set), each at its working-directory path, captioned with its phone and email and which role it plays (candidate-facing Original, or admin-only Application — state plainly that admin should use the Application file, not the Original, to actually submit the application when one exists). No PDF.
 2. Drive: one line per file with its Drive name and status from `push-resume-to-drive` (in Drive, updated, upload failed integrity check with byte sizes, or not pushed with the one-line fix), plus the candidate folder link.
 3. Leads: the count found by `hiring-contact-finder`, and whether they were pushed to the campaign, skipped (no campaignId), or hit the no-live-application case, plus `09_leads.md`'s path.
 4. One line: the check trail, e.g. "Stage 4 FAIL (HM-2) → fix → PASS → Stage 6 PASS".
-5. One line per file: file name, phone and email, and the source of each, e.g. "Resume_2: phone (supplied), email (profile)".
+5. One line per file: file name, phone and email, and the source of each, e.g. "Resume (Original): phone (profile), email (profile)" / "Resume_Apply: phone (supplied), email (profile)".
 6. Needs candidate confirmation, most interview-exposed first.
 7. Intentional imperfections, each quoted with its clean version.
 8. Gaps still present, if any, as noted in the final check (Confirm items and anything tagged in the pass list as ranking only).

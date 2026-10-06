@@ -4,3 +4,4 @@
 !.env.example
 .secrets/
 wideapply-campaign/*
+.DS_Store

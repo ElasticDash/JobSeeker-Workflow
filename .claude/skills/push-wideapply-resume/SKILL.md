@@ -57,7 +57,7 @@ to the user to run themselves.
 - Proactively, right after a candidate's first resume is finalized against an
   application (`push-resume-to-application`), if the plan for this candidate
   includes any email outreach later (template 9 in `PROMPTS.md`) — doing it once up
-  front avoids discovering the gap only after researching and drafting 20 leads.
+  front avoids discovering the gap only after researching and drafting leads.
 - The user directly asks to "parse this candidate's resume" or "fix the no-parsed-
   resume error."
 
