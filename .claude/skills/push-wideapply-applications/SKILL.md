@@ -99,14 +99,23 @@ Run from the repo root:
 echo '<applications JSON array>' | node .claude/skills/push-wideapply-applications/push-applications.mjs --env dev --campaign <campaignId>
 ```
 
-The script prints exactly one JSON line to stdout — `{"ok":bool,"env":...,"campaign":...,"count":N,"results":[{"index","ok","company","role","id"|"error"},...]}` — with a non-zero exit code if any item failed. Relay per-item success/failure back to the user in plain language (e.g. "6 of 7 logged; 'Acme Corp / Staff PM' failed: <error>"), don't just paste the raw JSON.
+The script prints exactly one JSON line to stdout — `{"ok":bool,"env":...,"campaign":...,"count":N,"results":[{"index","ok","company","role","id"|"error"|"assumedSuccess","note"},...]}` — with a non-zero exit code only if a genuine (non-timeout) failure occurred. Relay per-item success/failure back to the user in plain language (e.g. "6 of 7 logged; 'Acme Corp / Staff PM' failed: <error>"), don't just paste the raw JSON. Call out any `assumedSuccess: true` items separately (see below) rather than lumping them in with plain successes.
+
+## Timeouts are treated as success, not failure — confirmed 2026-10-06
+
+A `408`/timeout response from this backend does **not** mean the insert failed — confirmed on a real dev run (candidate Mark Matas, campaign `ac08d103-7c17-4855-af07-edbdf1a900bc`) where an item reported as a 408 timeout had actually been created server-side anyway, discovered only because the user spot-checked the dashboard and saw a duplicate after a retry created a second row for the same posting. The script (`push-applications.mjs`) now scores any `response.status === 408` or any error message matching `/timeout/i` as `ok: true, assumedSuccess: true, id: null` instead of a failure — `id` is `null` because a timeout response carries no body to read the created row's id from.
+
+**Never retry an item that came back as a timeout.** Retrying it is what caused the duplicate in the first place — if the first attempt actually landed, the retry creates a second row for the same posting. If the user wants to confirm an `assumedSuccess` item actually exists (or get its real `id`), that requires reading the campaign's application list, which this skill's scoped key cannot do (POST-only, see "One-time setup") — point them at the admin dashboard instead of re-running the script.
+
+This only applies to timeouts specifically. A genuine failure (`ok: false`, no `assumedSuccess` flag) — bad enum value, missing required field, 401/403, network unreachable — is unaffected by this and should still be handled per "If it fails" below.
 
 ## If it fails
 
-- **A specific item's error** — read `results[i].error`; the backend validates `company`/`role` (required) and enum fields (`status`, `workMode`, `companyType`) and will name exactly which one is wrong. Fix that item's mapping and retry only that item, not the whole batch.
+- **A specific item's error (`ok: false`, not a timeout)** — read `results[i].error`; the backend validates `company`/`role` (required) and enum fields (`status`, `workMode`, `companyType`) and will name exactly which one is wrong. Fix that item's mapping and retry only that item, not the whole batch.
 - **`Env file not found: .secrets/wideapply-applications-skill/.env.<env>`** — that environment hasn't been set up yet. Tell the user to create it (see "One-time setup" below) — you cannot create or fill in the key yourself.
 - **401/403 from the backend** — the scoped key either isn't configured or isn't allowed on this route yet; see "One-time setup". Don't retry with a different key you make up.
 - **Any other network/connection error** — the backend for that environment may be down or unreachable from this machine; tell the user, don't retry silently in a loop.
+- **A timeout (`ok: true, assumedSuccess: true`)** — not a failure at all; see "Timeouts are treated as success, not failure" above. Do not retry.
 
 ## What you must never do
 
@@ -115,6 +124,7 @@ The script prints exactly one JSON line to stdout — `{"ok":bool,"env":...,"cam
 - Never skip Step 3's visible table to go straight from search results to a backend write.
 - Never invent `jobPostUrl`, `salaryRange`, `city`, or `companyType` when the search provider (Hirebase or TheirStack) didn't provide the underlying data — omit the field instead.
 - Never retry a prod write automatically after a failure without the user re-confirming.
+- Never retry any item the script reports as a timeout (`assumedSuccess: true`) — presumed already inserted; retrying risks a duplicate (see above).
 - Never fall back to `push-wideapply-leads`'s key/env folder for this — this skill uses its own scoped key restricted to a different route (see below), and mixing them defeats the point of scoping.
 
 ## One-time setup (tell the user this if `.env.dev`/`.env.prod` don't exist yet)

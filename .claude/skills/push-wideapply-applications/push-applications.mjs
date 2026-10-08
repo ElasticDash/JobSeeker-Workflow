@@ -152,6 +152,26 @@ async function main() {
 
         if (!response.ok) {
             const message = parsed?.message ?? (rawBody || 'Unknown error');
+            // A 408 here is the backend's own timeout response, not proof the insert
+            // failed — confirmed on a real dev run where an item reported as a 408
+            // had actually been created server-side anyway. Treat any timeout as a
+            // presumed success and never retry it: retrying risks a duplicate insert
+            // of a row that already landed. No `id` is available from a timeout
+            // response, so this can't be confirmed from here — check the dashboard
+            // if the id is needed.
+            const isTimeout = response.status === 408 || /timeout/i.test(message);
+            if (isTimeout) {
+                results.push({
+                    index: i,
+                    ok: true,
+                    company: app.company,
+                    role: app.role,
+                    id: null,
+                    assumedSuccess: true,
+                    note: `Request timed out (${message}) — presumed to have succeeded server-side; do not retry.`,
+                });
+                continue;
+            }
             results.push({ index: i, ok: false, company: app.company, role: app.role, status: response.status, error: message });
             anyFailed = true;
             continue;

@@ -290,6 +290,22 @@ per-call `limit` cap is 100, so this is at most two calls):
      every multi-language mention as OR just because one of the named
      languages happens to match — read whether the posting actually frames
      them as alternatives or as two things the role needs at once.
+     **A posting can mention the same language or platform more than once
+     with different framing — check every occurrence independently, not
+     just the first one found** (confirmed missed on a real run, candidate
+     Tarunn Gusain, 2026-10-07: a posting mentioned AWS four times — three
+     safely OR'd or "preferred" — but a separate bullet buried mid-posting,
+     "AWS ecosystem with specific, practical experience leveraging AWS
+     Cognito for identity management," had no OR and no "preferred," a
+     hard standalone requirement for a named AWS service the candidate had
+     zero evidence of; it was missed because the other three mentions were
+     checked, found safe, and the posting was marked clear without
+     separately verifying the remaining occurrence). Finding one OR'd or
+     soft mention of a language/platform elsewhere in the same posting
+     does not clear a different, hard-framed mention of that same
+     language/platform — scan the full description for every instance of
+     each named technology it references and classify each occurrence's
+     framing on its own before passing the posting.
      Separately, still reject a
      posting whose core ask is a specialized **domain**, not just a
      language or framework — platform-specific business-logic
