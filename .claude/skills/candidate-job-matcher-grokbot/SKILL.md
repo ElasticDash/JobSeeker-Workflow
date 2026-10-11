@@ -50,7 +50,13 @@ Identical to `candidate-job-matcher`'s Step 1 (read it there for the full
 provisional-thresholds caveat). Summarized:
 
 1. Sum total YOE from every `## Experience` entry's date range (open-ended
-   entries count through today). State the arithmetic explicitly.
+   entries count through today). State the arithmetic explicitly. Count
+   full-time entries only — exclude internship- or part-time-titled entries
+   by default, unless there's a specific, stated reason to include one
+   (e.g. an ambiguous non-"Intern" title like a graduate capstone still
+   needs an explicit judgment call, not a silent default). Say which entries
+   were excluded and why, and state the full-time-only total separately from
+   any looser total that includes them.
 2. Map total YOE to a label:
 
    | Total YOE | Label |
@@ -102,6 +108,19 @@ match.
 State which family/tag you matched (or that none matched, and why you fell
 back to judgment) before producing the output JSON so the choice is visible
 and auditable back to the table, not a freehand list.
+
+**`excludeOffDomain` words disqualify a posting even inside a compound/
+hybrid title that also contains "Software Engineer" or "Developer"** — e.g.
+"Senior Platform Software Engineer" is a Platform Engineer posting, not a
+generic SWE one with an extra adjective, even though the family's own base
+noun is sitting right there in the title (confirmed missed downstream of
+this exact table on a real run, candidate Cory Owens, 2026-10-09 — see
+`candidate-job-matcher`'s Step 2/Step 4 for the full writeup). This skill
+only emits the condition and doesn't filter results itself, but since
+whatever reads `titles.excludeOffDomain` downstream (a human reviewing
+GrokBot's output, or `wideapply-campaign-pipeline`'s Stage 0 scoring) has to
+apply it the same way, say so explicitly in the Output notes rather than
+assuming a word-boundary match is obvious.
 
 Separately, build the seniority exclusion words for the computed bucket (both
 directions, too-senior and too-junior), same table `candidate-job-matcher`

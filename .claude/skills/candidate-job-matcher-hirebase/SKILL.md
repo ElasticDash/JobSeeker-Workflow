@@ -87,7 +87,7 @@ belongs, not the inclusion list.
 
 | Filter | Derived from | Notes |
 |---|---|---|
-| `job_titles` | Expanded title list, **plus** exclusion entries | One array does both jobs TheirStack split across `job_title_or`/`job_title_not`. Each entry with no `-` prefix is OR'd in; prefix an entry with `-` (e.g. `"-senior"`) to exclude it — same seniority exclusion words as candidate-job-matcher's table (too-senior and too-junior words both, per the candidate's bucket). Each entry itself matches all its own words in any order — `"data scientist"` requires both words present, not either — so don't put more than 2-3 words in one entry. Use `"\"exact phrase\""` (escaped quotes inside the string) when word-boundary precision matters. |
+| `job_titles` | Expanded title list, **plus** exclusion entries | One array does both jobs TheirStack split across `job_title_or`/`job_title_not`. Each entry with no `-` prefix is OR'd in; prefix an entry with `-` (e.g. `"-senior"`) to exclude it — port over **both** exclusion sets from candidate-job-matcher's Step 2 table, not just seniority: the seniority words (too-senior and too-junior, per the candidate's bucket) **and** the family's disambiguation exclusion list (e.g. Software Engineer family: Data/ML/QA/Security/Network/DevOps-SRE-Platform/Infrastructure/Mechanical-etc./Sales-Solutions-Support). Skipping the disambiguation half is a real gap, not a theoretical one — a run that only carried seniority excludes into `job_titles` let "Senior Platform Software Engineer" through against a "Backend Engineer" anchor (candidate Cory Owens, 2026-10-09; see Step 4's Title-level check below for the second layer that's supposed to catch this even when the query-level exclude is missing). Each entry itself matches all its own words in any order — `"data scientist"` requires both words present, not either — so don't put more than 2-3 words in one entry. Use `"\"exact phrase\""` (escaped quotes inside the string) when word-boundary precision matters. |
 | `yoe` | `{min, max}` from Step 1 | **This replaces candidate-job-matcher's entire client-side regex/description-parsing step.** Hirebase parses years-of-experience server-side into each job's `yoe_range` and filters on it directly — set `min` to the floor and `max` to the ceiling (Step 1). No regex pass needed for the single-dimension case. |
 | `include_yoe` | Always `"true"` | Without this, jobs with no stated YOE may be silently excluded once a `yoe` filter is set — same "don't silently drop unknowns" principle as candidate-job-matcher. Flag jobs with a `null` `yoe_range` in the output as "requirement unstated," don't let them look like a confirmed match. |
 | `experience` | Step 1's label, mapped per the table above | Coarse pre-filter only — see above. |
@@ -222,16 +222,28 @@ a condition and re-size, don't just proceed to pulling a near-empty result
 set.
 
 **Then pull real pages**, capped at **200 raw jobs per run** (Hirebase's own
-per-call `limit` cap is 100, so this is at most two calls):
+per-call `limit` cap is 100, so this is at most two calls at that cap — but
+don't default to the cap, scale the pull to the target):
 
-1. Pull page 1: the same filter as the winning sizing call (same
-   `job_titles`/`yoe`/`keywords`/`days_ago`/etc, just swap `page: 999` for
-   `page: 1`), `"limit": 100`. Always include `sort_by: "relevance"`,
-   `sort_order: "desc"` (see Seen-jobs dedup section above for why this
-   replaced `date_posted`).
-2. If `total_pages` (from either call) indicates more remain and N still
-   isn't met after filtering page 1's jobs (steps below), pull page 2: same
-   filter, `"page": 2, "limit": 100`.
+1. **Size the first pull's `limit` to the target `N`, not a flat 100**
+   (added 2026-10-09, user directive — confirmed real waste: pulling 100-200
+   raw jobs when the target was only 2 or 4 burns credits on far more
+   screening than the target justifies). Use `limit = min(100, max(20, N * 10))`
+   — e.g. `N=2` → `limit=20`, `N=4` → `limit=40`, `N=20` → `limit=100`
+   (already at the per-call cap). Pull page 1 with that `limit`, the same
+   filter as the winning sizing call (same `job_titles`/`yoe`/`keywords`/
+   `days_ago`/etc, just swap `page: 999` for `page: 1`). Always include
+   `sort_by: "relevance"`, `sort_order: "desc"` (see Seen-jobs dedup section
+   above for why this replaced `date_posted`).
+2. If accepted jobs after filtering page 1 are still short of `N`, and
+   `total_pages`/`total_count` indicates more remain, pull again —
+   widening the `limit` toward 100 (capping there) before reaching for a
+   second page, since a single larger pull is one API round-trip instead
+   of two. Only pull an actual page 2 (`"page": 2`) once `limit` is already
+   at 100 and still short. Stop entirely once cumulative raw jobs pulled
+   this run hits the 200 session cap, same as before — scaling the first
+   pull down doesn't raise that ceiling, it just stops wasting it on a
+   small ask.
 3. **Hard stop after page 2 regardless of whether N is met** — 200 raw jobs
    is this run's cap, not a target to keep pushing past.
 4. Per job (on either page), four checks:
@@ -240,7 +252,23 @@ per-call `limit` cap is 100, so this is at most two calls):
      suffixes, "Entry Level", "New Grad", "Intern", "Associate") — same
      backstop role as candidate-job-matcher's Step 4 item 2. Also catch
      near-duplicates here (same `company_name`+`job_title` reposted across
-     `job_board`s).
+     `job_board`s). **Also re-check `job_title` against the family's full
+     disambiguation exclusion list itself (Data/ML/QA/Security/Network/
+     DevOps-SRE-Platform/Infrastructure/etc.), as its own backstop — don't
+     assume the `-` entries in `job_titles` already filtered every one of
+     these out.** A compound/hybrid title that pairs a disambiguation word
+     with "Software Engineer" or "Developer" (e.g. "Senior Platform Software
+     Engineer," "Site Reliability Software Engineer," "Software Engineer,
+     Data Platform") still reads to a quick review as a generic SWE posting
+     with an extra adjective, not the specialized-field posting it actually
+     is — confirmed missed on a real run, candidate Cory Owens, 2026-10-09:
+     Oracle's "Senior Platform Software Engineer" was accepted against a
+     plain "Backend Engineer" anchor, and the posting's own description
+     confirmed the role was SRE/infrastructure/developer-experience platform
+     work, a different skillset from generalist backend. Drop on the
+     disambiguation word regardless of what else is in the same title, and
+     regardless of whether `job_titles`'s own `-` excludes should have
+     already caught it.
    - **Numeric YOE check**: already enforced server-side by the `yoe` filter
      (Step 2) for the single-dimension case — no regex pass needed. **Still
      read `description`/`requirements_summary` by hand when a posting states
@@ -322,6 +350,62 @@ per-call `limit` cap is 100, so this is at most two calls):
      `skills[]`/`technologies[]` entry still needs the full JD read stage
      2a already does), so expect this to reduce, not eliminate,
      title-invisible domain-gap handoffs.
+     **This gate is not language-only — it covers every hard, explicitly-stated
+     mandatory skill, platform, OS, tool, or certification named in the
+     posting, not just the programming language** (confirmed as a real gap
+     2026-10-08: postings requiring Linux experience were passing this
+     check because only the programming-language dimension was being
+     checked; the candidate had no Linux evidence anywhere in their
+     profile and the posting stated it as a plain requirement, not
+     "preferred" or "a plus"). The language-vs-framework leniency above
+     applies specifically to a programming language and the framework/
+     library/tool built on top of it (Django vs. FastAPI, Express vs.
+     NestJS) — it does not extend to other hard-stated requirements that
+     aren't "just a framework choice" (an OS like Linux/Windows, a
+     specific cloud certification, a named non-language tool with no
+     substitute the candidate has used). For every hard-stated requirement
+     of this kind, check the candidate's whole profile (Skills list,
+     Experience bullets, anywhere real evidence could appear — not the
+     Skills list header alone, same as the Java/Cory Owens precedent
+     above) and reject if there's zero evidence anywhere. Soft-framed
+     mentions ("preferred," "a plus," "nice to have," one option in an
+     explicit "or equivalent" list) are not grounds to reject on their
+     own — only a plain, unqualified requirement is.
+     **A years number attached to one specific skill/language is a sharper
+     gate than "has touched it anywhere" — compute it like a real YOE
+     requirement, not a binary language-knows-it check** (confirmed missed
+     on a real run, candidate Soureesh Dalal, 2026-10-11: Uber Freight's
+     posting required "3 years of experience in Golang" as its own bullet,
+     separate from the role's general YOE line. The candidate's Skills list
+     named Go and one personal side project used Go, so the "evidence
+     anywhere" leniency above — designed to answer "has she ever worked
+     with this language at all" — let it through. But she had zero
+     professional, paid, dated-Experience-section years of Go; the only Go
+     use was a personal project, not a job). Whenever a requirement states
+     a specific number tied to one named language, skill, or tool — not the
+     role's general "`N`+ years of experience" line — compute that skill's
+     own years the same way the candidate's overall YOE floor/ceiling is
+     computed in Step 1: sum only the dated `## Experience` entries where
+     that specific skill was actually used, never a Skills-list self-report
+     and never a personal/academic project. If that sum falls short of the
+     stated number, reject, even though the same skill still counts for the
+     binary "has she ever touched this language" check elsewhere in this
+     gate — a Skills-list mention or a project is real evidence of exposure,
+     it just isn't evidence of years. The same run's ICF posting showed the
+     identical pattern one level down ("1+ year applying accessible
+     development practices... Section 508 or WCAG requirements," a plain
+     Requirements-list bullet, zero accessibility evidence anywhere in the
+     profile — same sub-skill-years failure, just starting from zero instead
+     of a project-only number). **Don't let a posting's requirements list looking
+     auto-generated or absurd excuse skipping this check for the one bullet
+     that is the actual core differentiator skill** — Uber Freight's own
+     list mixed obviously-noise tool/editor bullets ("3 years of experience
+     in VS Code," the IDE) in with "3 years of experience in Golang," and
+     the noise was used as a reason to wave off the whole list instead of
+     still running the real-years check on the one bullet that mattered.
+     Triage each skill-specific years bullet on its own (core differentiator
+     vs. editor/tool noise) and still apply the real-years check to whichever
+     ones are core.
    - **Dedup check**: drop if `_id` is in the seen-jobs cache (see above).
 5. Append accepted jobs; stop at N (truncate unless "at least N" was asked).
 
@@ -400,12 +484,12 @@ echo '{"job_titles": ["Software Engineer", "Backend Engineer", "-senior", "-staf
 echo '{"job_titles": ["Software Engineer", "Backend Engineer", "-senior", "-staff"], "keywords": ["Python", "AWS", "Docker", "..."], "yoe": {"min": 3, "max": 5}, "include_yoe": "true", "location_types": ["Remote"], "days_ago": 14, "page": 999, "limit": 100}' \
   | node .claude/skills/candidate-job-matcher-hirebase/hirebase-search.mjs --endpoint search
 
-# pull page 1 (same filter as the winning sizing call, page swapped to 1) — sort_by: relevance (changed 2026-10-05, was date_posted) so skill-matching jobs cluster on page 1
-echo '{"job_titles": [...], "keywords": [...], "yoe": {...}, "days_ago": 7, "page": 1, "limit": 100, "sort_by": "relevance", "sort_order": "desc"}' \
+# pull page 1 (same filter as the winning sizing call, page swapped to 1) — limit scaled to N (min(100, max(20, N*10)), changed 2026-10-09, not a flat 100), sort_by: relevance (changed 2026-10-05, was date_posted) so skill-matching jobs cluster on page 1. Example for N=2: limit=20.
+echo '{"job_titles": [...], "keywords": [...], "yoe": {...}, "days_ago": 7, "page": 1, "limit": 20, "sort_by": "relevance", "sort_order": "desc"}' \
   | node .claude/skills/candidate-job-matcher-hirebase/hirebase-search.mjs --endpoint search
 
-# pull page 2, only if total_pages > 1 and N still isn't met after filtering page 1
-echo '{"job_titles": [...], "keywords": [...], "yoe": {...}, "days_ago": 7, "page": 2, "limit": 100, "sort_by": "relevance", "sort_order": "desc"}' \
+# still short after filtering page 1 and more remain: widen limit toward 100 before reaching for an actual page 2
+echo '{"job_titles": [...], "keywords": [...], "yoe": {...}, "days_ago": 7, "page": 1, "limit": 100, "sort_by": "relevance", "sort_order": "desc"}' \
   | node .claude/skills/candidate-job-matcher-hirebase/hirebase-search.mjs --endpoint search
 ```
 
@@ -433,6 +517,10 @@ exit code on failure, with `billingCode`/`retryAfter`/`error` populated — see
   re-size — never add conditions to try to fix a thin result.
 - Never exceed 2 real pull pages (`limit: 100` each) or 200 raw jobs pulled
   in a single search attempt (one `job_titles`/filter combination).
+- **Scale the first real pull's `limit` to the target `N`, never default to
+  100 regardless of ask size** (added 2026-10-09, user directive):
+  `limit = min(100, max(20, N * 10))`. Only widen toward 100 (and only then
+  reach for an actual page 2) if the scaled-down pull came back short.
 - **Session-level circuit breaker, separate from the per-attempt cap above
   (added 2026-10-05):** if a broader task needs to invoke this skill
   repeatedly with different filter variants (different title sets, widened

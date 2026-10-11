@@ -48,7 +48,8 @@ Every gap gets exactly one route:
 
 | Kind | Route | Rule |
 |---|---|---|
-| keyword / tool | Skills | Add it, or move it up if the cause is `buried`. If a narrative HM check needs the same term, route Skills + Experience |
+| keyword / tool, named | Skills | The pass list states one or more specific proper nouns (e.g. "Django", "AWS"). Add it, or move it up if the cause is `buried`. If a narrative HM check needs the same term, route Skills + Experience |
+| keyword / tool, open-category | Skills | The pass list criterion names a category, not a specific tool (e.g. "any Python backend framework", "a framework like React, Angular, Vue, or similar", "a cloud platform"). No single term to copy, since the JD itself does not require one. Run the open-category test below, pick one specific instance, and add it. Never route this Human just because no named instance appears on the CV — the absence of a named instance is expected, not a gap, until one is chosen |
 | narrative (most HM checks) | Experience | Cause `weak`: strengthen the existing bullet in the same role. No evidence: run the plausibility test. If no role passes, Human |
 | title | Experience or Human | The base title never changes. Pass by a title suffix, or by ownership stated in bullets when the pass list allows it. Otherwise Human |
 | years | Ignore or Human | Dates are fixed. Shortfall within `TOLERANCE_MONTHS`: Ignore. Otherwise Human. A years claim in the Profile never counts |
@@ -83,6 +84,34 @@ A role passes only if all four hold:
 - Pick the first role that passes, and record the role and the reason.
 - If no role passes, route Human and list each role with the test it failed.
 
+## Open-category test
+
+Run for each gap routed `keyword / tool, open-category`. The pass list asks for one
+instance of a category, not a named technology, so a Fail here means "no instance
+chosen yet", not "cannot be fixed" (confirmed as a real miss on a real run: a
+Cognite JD asking for "hands-on experience with Python and any Python backend
+framework" was marked Fail and left unfixed because no framework was named on the
+CV, when the actual gap was just that nobody had picked one).
+
+1. **Family match.** The instance must belong to the same language or platform
+   family the candidate already has real evidence for (from Experience, not just
+   Skills). A Python category gets a Python framework (FastAPI, Flask, Django), not
+   a Java or Node one, even if the candidate's Skills list happens to show Java too.
+2. **Commonality.** Prefer the most common, mainstream instance for that family
+   unless the surrounding JD text or the candidate's actual work points to a
+   particular sub-type (e.g. the JD also mentions async APIs or LLM integration
+   work: FastAPI over Flask; a JD emphasising enterprise/ORM-heavy work: Django over
+   FastAPI).
+3. **No new language.** Never use this test to introduce a language or platform
+   family the candidate has no real evidence for at all. That is a different,
+   larger gap than an open-category check, and still routes Human.
+4. **One instance only.** Pick exactly one. Adding two or three "covers the bases"
+   reads as padding and invites a follow-up question the candidate cannot answer.
+
+Record the category, the instance chosen, and the one-line reason (family match,
+and commonality or JD signal). This is always a new claim: mark it "needs
+confirmation" in the fix spec the same as any other invented item.
+
 ## Capacity check
 
 Run after all gaps are routed, and before deciding FIXABLE:
@@ -112,7 +141,7 @@ Run after all gaps are routed, and before deciding FIXABLE:
    - Check ID
    - Section: Skills or Experience
    - Target: the Skills line, or the role (employer, dates) plus the bullet to rewrite, merge or replace, quoted, or "new bullet"
-   - Must show: what passes, from the pass list
+   - Must show: what passes, from the pass list. For `keyword / tool, open-category`, name the specific instance chosen (open-category test above), not just the category
    - Substance: the kind of work this employer, base title and time window could plausibly have had. Describe the substance, not the wording.
    - Constraints: the other check IDs this bullet or role must keep proving, intern scope, JD phrases to avoid, opening verbs already used
    - Needs confirmation: yes for any new claim, no for moving existing text

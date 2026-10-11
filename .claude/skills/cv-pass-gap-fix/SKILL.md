@@ -37,6 +37,7 @@ Before any edit, copy the current resume to the next version file (`03_ideal_cv_
 ### 2. Apply Skills fixes
 
 - Add each required term exactly as the pass list spells it for proper names (tools, platforms, standards). Name practices in the candidate's own words.
+- For a `keyword / tool, open-category` spec, the pass list named a category, not a term, so there is nothing to copy verbatim. Add exactly the instance the triage's "Must show" line names (it already ran the family-match and commonality checks). Do not substitute a different instance, and do not add more than the one the spec names.
 - For a `buried` cause, move the term into the first half of its line.
 - Keep Skills at 2 or 3 lines. If a line overflows, drop the item the spec names.
 - Keep 2 or 3 real items from the candidate's material that the JD did not ask for.
