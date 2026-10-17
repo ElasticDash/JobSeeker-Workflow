@@ -25,6 +25,7 @@ Where a template includes a markdown link like `([company_linkedin_url]({{compan
   - [11. Build a GrokBot job search condition](#11-build-a-grokbot-job-search-condition)
   - [12. Bulk-apply from a pre-gathered job list](#12-bulk-apply-from-a-pre-gathered-job-list)
   - [13. Fetch fresh ATS jobs and schedule next week's applications](#13-fetch-fresh-ats-jobs-and-schedule-next-weeks-applications)
+  - [14. Generate the four sourcing-and-log prompts for a candidate](#14-generate-the-four-sourcing-and-log-prompts-for-a-candidate)
 
 ---
 
@@ -409,3 +410,66 @@ three scoped keys, plus template 10 run once per candidate before the first
 email-draft attempt). Leads use `hiring-contact-finder`'s current default
 (manager/hr_recruiting only, 5 per application, changed 2026-10-06 — see that
 skill), same as every other template that chains it.
+
+---
+
+## 14. Generate the four sourcing-and-log prompts for a candidate
+
+A drafting step, not a sourcing run: an agent ("agent 1") reads
+`.temp/test_prompt.md`'s template (Hirebase / ATS-direct / Apify-Wellfound /
+GrokBot board-tier) plus a candidate's profile, derives every
+profile-specific field the template calls for (full Skills-list keywords,
+real core languages from Skills *and* Experience bullets, the
+relocation-aware location gate, the national-security gate, the
+fixed-family title exclusion sets, full-time-only YOE), and hands back the
+four fully filled-in prompts for review — it does not call
+`push-wideapply-applications` or write anything itself. Each returned
+prompt is still sourcing-and-log only by default, same as the template's
+own scope; append that template's "Full pipeline addendum" to any of them
+afterward if resume/leads/outreach should run too. See `README.md` for the
+full three-step walkthrough (paste profile → run this template → run the
+four prompts in parallel) and what's automatic vs. manual across them.
+
+Three of the four (Hirebase, ATS-direct, Apify/Wellfound) are each a
+single, self-contained agent turn that sources, screens, and pushes
+straight to the campaign. The fourth (GrokBot) is structurally different —
+GrokBot isn't a Claude Code skill call, so its prompt comes back as two
+parts: 4a is what gets pasted into GrokBot itself, 4b is what a (possibly
+different) agent runs afterward, once GrokBot's raw results exist, to
+screen/map/push them — the one "manually forwarded" step in the set.
+
+```
+Read .temp/test_prompt.md's template and this candidate's profile, derive every profile-specific field it calls for, and produce the four fully filled-in, ready-to-run sourcing prompts — Prompt 1 (Hirebase), Prompt 2 (ATS-direct), Prompt 3 (Apify/Wellfound), Prompt 4 (GrokBot board-tier, parts 4a and 4b). Hand back the four filled prompts for review — do not run any of them yet.
+
+Campaign ID: {{campaign_id}}
+Candidate profile: {{profile_path}}
+Target title(s): {{target_title}}
+Target job count (N): {{n}}
+Environment: {{environment}}
+```
+
+**Worked example:**
+
+```
+Read .temp/test_prompt.md's template and this candidate's profile, derive every profile-specific field it calls for, and produce the four fully filled-in, ready-to-run sourcing prompts — Prompt 1 (Hirebase), Prompt 2 (ATS-direct), Prompt 3 (Apify/Wellfound), Prompt 4 (GrokBot board-tier, parts 4a and 4b). Hand back the four filled prompts for review — do not run any of them yet.
+
+Campaign ID: e018b7eb-f8d9-4fae-853b-8dcd925505a0
+Candidate profile: .temp/Mark-Matas-wideapply-export.md
+Target title(s): Full Stack Software Engineer
+Target job count (N): 20
+Environment: dev
+```
+
+| Placeholder | Required | Notes |
+|---|---|---|
+| `{{campaign_id}}` | yes | Never guessed — same rule as every other template here. |
+| `{{profile_path}}` | yes | The candidate's `.md` export, already pasted into `.temp/` (see `README.md` step 1). The template's own item 1 warns the H1 header can be stale — the `## Contact` section's `Name` field is authoritative; flag a mismatch rather than silently picking one. |
+| `{{target_title}}` | yes | The anchor title, plus any other titles the user says would also work. |
+| `{{n}}` | yes | Target job count, applied independently to each of the four prompts (they're parallel, non-overlapping sources, not one `{{n}}` split four ways — see the template's "On duplication" section for why that's safe). |
+| `{{environment}}` | yes | `dev` or `prod` — confirm explicitly before the first prod write for a given campaign, same as every other template. |
+
+The four filled prompts this produces are each meant to be reviewed, then
+sent as their own separate turn (or run by a separate agent) — don't chain
+straight from "generate the four prompts" into actually running them in
+the same breath; the mapped-table-before-writing checkpoint inside each
+one only means something if a human can still say no first.

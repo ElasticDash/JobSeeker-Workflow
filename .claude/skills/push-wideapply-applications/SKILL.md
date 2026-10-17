@@ -1,13 +1,13 @@
 ---
 name: push-wideapply-applications
-description: Search for N jobs matching a WideApply candidate's profile via Hirebase (default) or TheirStack, per JOB_SOURCE (looping until N is met, excluding postings requiring more experience than the candidate has and jobs already shown in a prior run) and log the matches into that candidate's campaign as "found"-status job applications, via ElasticDash-BE's applications API. Use whenever the user wants jobs found via Hirebase or TheirStack automatically added/logged/created as applications for a candidate, not just listed.
+description: Search for N jobs matching a WideApply candidate's profile via Hirebase (default), TheirStack, or Apify/Wellfound, per JOB_SOURCE (looping until N is met, excluding postings requiring more experience than the candidate has and jobs already shown in a prior run) and log the matches into that candidate's campaign as "found"-status job applications, via ElasticDash-BE's applications API. Use whenever the user wants jobs found via Hirebase, TheirStack, or Apify automatically added/logged/created as applications for a candidate, not just listed.
 ---
 
 # Push WideApply Applications
 
 Chains two things that are each already handled elsewhere:
 
-1. **Search** — delegate to `candidate-job-matcher-hirebase` (default) or `candidate-job-matcher`, per `JOB_SOURCE` (invoke whichever one via the Skill tool) to turn the candidate's profile into a sized, sampled, deduped job list from that provider. Do not re-implement seniority calc, filter building, or the size-then-pull loop here — that skill owns it, whichever one is in play.
+1. **Search** — delegate to `candidate-job-matcher-hirebase` (default), `candidate-job-matcher`, or `candidate-job-matcher-apify`, per `JOB_SOURCE` (invoke whichever one via the Skill tool) to turn the candidate's profile into a sized, sampled, deduped job list from that provider. Do not re-implement seniority calc, filter building, or the size-then-pull loop here — that skill owns it, whichever one is in play.
 2. **Log as found** — map each accepted match to a WideApply application object and insert it via `POST /admin/campaigns/:campaignId/applications` (`status: 'found'`), by running `push-applications.mjs` in this skill's own folder. The script — not you — holds the auth key and makes the HTTP call; you only ever build the JSON payload and invoke it.
 
 This is a **write to a real candidate's campaign**, not a read-only search. Even though the user asked for search-and-log to happen in one flow, always show the mapped table (Step 3 below) before calling the script — do not skip straight from search results to a backend insert with no visible intermediate step.
@@ -18,19 +18,19 @@ Same constraint as `push-wideapply-leads`: this needs a real shell on the user's
 
 ## When this triggers
 
-The user wants job-search matches turned into logged applications for a specific candidate/campaign, not just a table to look at. Trigger on: "find and log jobs for this candidate", "search Hirebase/TheirStack and add these as found applications", "auto-log jobs for campaign X". If the user only wants a job table with no backend write, that's plain `candidate-job-matcher-hirebase` or `candidate-job-matcher` — don't invoke this skill for that.
+The user wants job-search matches turned into logged applications for a specific candidate/campaign, not just a table to look at. Trigger on: "find and log jobs for this candidate", "search Hirebase/TheirStack/Apify and add these as found applications", "auto-log jobs for campaign X". If the user only wants a job table with no backend write, that's plain `candidate-job-matcher-hirebase`, `candidate-job-matcher`, or `candidate-job-matcher-apify` — don't invoke this skill for that.
 
 ## What you need before calling the script
 
 1. **`campaignId`** — the user gives you this directly. If they haven't given it, ask for it — don't guess or search for it yourself. This is the WideApply campaign the applications get attached to, separate from anything the search provider returns. Also pass this to the matcher skill in use as its dedup cache key if the candidate's email isn't available in the profile export (see that skill's "Seen-jobs dedup" section) — reuse the same `campaignId` across runs so dedup actually accumulates.
-2. **`JOB_SOURCE`** (optional, default `"hirebase"`) — `"hirebase"` delegates Step 1 to `candidate-job-matcher-hirebase`; `"theirstack"` delegates it to `candidate-job-matcher`. Defaults to Hirebase as of 2026-10-04 (previously hardcoded to TheirStack with no setting). When this skill is called from `wideapply-campaign-pipeline`, that skill passes its own `JOB_SOURCE` setting through unchanged — don't pick a different one here.
-3. **The candidate's profile export** — same input both matcher skills need (title history, YOE, location preference, work auth, desired salary).
+2. **`JOB_SOURCE`** (optional, default `"hirebase"`) — `"hirebase"` delegates Step 1 to `candidate-job-matcher-hirebase`; `"theirstack"` delegates it to `candidate-job-matcher`; `"apify"` delegates it to `candidate-job-matcher-apify` (Wellfound, added 2026-10-17 — a startup/VC-backed-employer-skewed source, see that skill's own caveat on when it's not a good substitute for the other two). Defaults to Hirebase as of 2026-10-04 (previously hardcoded to TheirStack with no setting). When this skill is called from `wideapply-campaign-pipeline`, that skill passes its own `JOB_SOURCE` setting through unchanged — don't pick a different one here.
+3. **The candidate's profile export** — same input all three matcher skills need (title history, YOE, location preference, work auth, desired salary).
 4. **Target job count (N)** — how many "found" applications to log this run. Ask if unstated. This is passed straight through to the matcher skill in use as its own target count (see that skill's Inputs) — it owns the pull-and-filter-until-N loop, including the numeric YOE cutoff and the seen-jobs dedup, so don't re-implement any of that here.
 5. **Environment** — default to `dev`. Only use `prod` if the user explicitly says "prod" or "production". Before the *first* prod write in a session, confirm explicitly with the user even if they already said prod once.
 
 ## Step 1: Run the search
 
-Invoke `candidate-job-matcher-hirebase` or `candidate-job-matcher` (per `JOB_SOURCE`) with the candidate profile, the target count N, and any explicit role/freshness/scope instructions from the user. Take its output table as-is — don't re-derive filters, don't re-run queries against that provider yourself, and don't re-apply the YOE or dedup filtering yourself; that skill already ran the full pull-and-filter loop and already updated its own seen-jobs cache for this candidate just by showing you the table (see its Step 4/5 and "Seen-jobs dedup" section) — no further action needed here to keep dedup working. The two providers keep separate caches (different `_id`/job-key space), so don't treat a job "seen" under one provider as seen under the other.
+Invoke `candidate-job-matcher-hirebase`, `candidate-job-matcher`, or `candidate-job-matcher-apify` (per `JOB_SOURCE`) with the candidate profile, the target count N, and any explicit role/freshness/scope instructions from the user. Take its output table as-is — don't re-derive filters, don't re-run queries against that provider yourself, and don't re-apply the YOE or dedup filtering yourself; that skill already ran the full pull-and-filter loop and already updated its own seen-jobs cache for this candidate just by showing you the table (see its Step 4/5 and "Seen-jobs dedup" section) — no further action needed here to keep dedup working. The three providers keep separate caches (different `_id`/job-key space), so don't treat a job "seen" under one provider as seen under another.
 
 If the matcher skill reports it fell short of N (search exhausted or hit its safety cap), don't silently push fewer applications and call it done — relay that shortfall to the user in Step 3's summary alongside the mapped table, same as you would for any other partial result.
 
@@ -38,11 +38,11 @@ If the matcher skill reports it fell short of N (search exhausted or hit its saf
 
 The matcher skill already pulled toward N and already dropped near-duplicates and out-of-range YOE postings, so by default every row in its output table is a candidate to log — don't re-trim to some other count on top of N. The one exception: if the user reviews the table (Step 3) and wants to hand-drop a specific row (wrong company, bad fit despite passing the filters), respect that.
 
-**Relocation-based location filter.** Check the candidate profile's "Desired Job Location" / willing-to-relocate answer. If it explicitly states not willing to relocate, drop any row that is not remote, not in the candidate's current city, and not in their stated desired city/location — don't log it as "found" at all (don't count it against N; the matcher skill's own seen-jobs cache already marked it seen, so it won't resurface). This is strictly better than letting it through and discovering the mismatch later as an `ideal-cv-pipeline-v4` handoff inside `wideapply-campaign-pipeline` — a pure location/relocation check needs no JD analysis, so there's no reason to spend a sourcing slot on it. If the profile says nothing, or says willing to relocate, every location passes this filter (same as both matcher skills' and `requirement-finder`'s own relocation-passes-by-default house rule). Report any row dropped this way in the Step 3 summary, same as any other shortfall.
+**Relocation-based location filter.** Check the candidate profile's "Desired Job Location" / willing-to-relocate answer. If it explicitly states not willing to relocate, drop any row that is not remote, not in the candidate's current city, and not in their stated desired city/location — don't log it as "found" at all (don't count it against N; the matcher skill's own seen-jobs cache already marked it seen, so it won't resurface). This is strictly better than letting it through and discovering the mismatch later as an `ideal-cv-pipeline-v4` handoff inside `wideapply-campaign-pipeline` — a pure location/relocation check needs no JD analysis, so there's no reason to spend a sourcing slot on it. If the profile says nothing, or says willing to relocate, every location passes this filter (same as all three matcher skills' and `requirement-finder`'s own relocation-passes-by-default house rule). Report any row dropped this way in the Step 3 summary, same as any other shortfall.
 
 ## Step 3: Map each match — show this table before pushing
 
-Field mapping depends on `JOB_SOURCE`. Both tables below produce the same application JSON shape and the same display-before-push discipline; only where each field is read from differs.
+Field mapping depends on `JOB_SOURCE`. All three tables below produce the same application JSON shape and the same display-before-push discipline; only where each field is read from differs.
 
 ### If `JOB_SOURCE = "hirebase"` (default)
 
@@ -59,6 +59,7 @@ Field mapping depends on `JOB_SOURCE`. Both tables below produce the same applic
 | `companyType` | `company_data.type`, lowercased | **correction, 2026-10-04**: Hirebase's result does carry this (confirmed on a real pull — `company_data.type: "Enterprise"`), contrary to this table's earlier claim that no such field exists. `companyType` is one of `startup`, `scale-up`, `mid-size`, `enterprise`, `non-profit`, `government`, `agency` — lowercase `company_data.type` and use it only if it cleanly matches one of those 7 values (e.g. `"Enterprise"` → `enterprise`); if it comes back as something that doesn't map cleanly, omit the field rather than guess |
 | `companySize` | built from `company_data.size_range.min`/`.max` as free text (e.g. `"1001-5000"`) | **correction, 2026-10-04**: also confirmed present on a real pull, contrary to the earlier "no equivalent field" claim — omit if `company_data.size_range` is `null` |
 | `source` | `'Hirebase'` | always set this — it becomes the auto-logged "Found on Hirebase" event on the application |
+| `jobPostedAt` | `date_posted` | pass through as-is (already `YYYY-MM-DD`/ISO) — the backend uses this to prioritize the daily send queue (older postings get earlier slots; a job with none falls to the back rather than jumping ahead of one that has it), added 2026-10-14. Omit entirely if `date_posted` is null — don't invent a posting date |
 | `notes` | optional | e.g. why this was flagged a fit, from the `candidate-job-matcher-hirebase` output — can also note `skills[]`/`technologies[]` stack-match signal from that skill's Output section |
 
 ### If `JOB_SOURCE = "theirstack"`
@@ -76,9 +77,28 @@ Field mapping depends on `JOB_SOURCE`. Both tables below produce the same applic
 | `companyType` | default `'direct_employer'`... | **wait** — `companyType` is one of `startup`, `scale-up`, `mid-size`, `enterprise`, `non-profit`, `government`, `agency`, NOT `direct_employer` (that's a *search* filter in `candidate-job-matcher`, a different enum). Only set `companyType` if you can honestly infer it (e.g. `employee_count` bucketed); otherwise omit it entirely rather than pass through the wrong enum. |
 | `companySize` | `company_object.employee_count`, as free text (e.g. `"501-1000"`) | optional, no fixed enum |
 | `source` | `'TheirStack'` | always set this — it becomes the auto-logged "Found on TheirStack" event on the application |
+| `jobPostedAt` | `date_posted` | same field name as the Hirebase table above (confirmed on TheirStack's own raw API — see `candidate-job-matcher`'s own SKILL.md `jq` extraction, not to be confused with GrokBot's unrelated `postedAt` field). Pass through as-is — the backend uses this to prioritize the daily send queue (older postings get earlier slots; a job with none falls to the back), added 2026-10-14. Omit entirely if `date_posted` is null — don't invent a posting date |
 | `notes` | optional | e.g. why this was flagged a fit, from the candidate-job-matcher output |
 
-**`jobDescription` must be clean markdown, not the provider's raw text verbatim**, regardless of `JOB_SOURCE`. This isn't cosmetic: the candidate-facing board renders this exact field through `react-markdown` with no raw-HTML passthrough and headings downgraded to bold paragraphs (`wideapply-dashboard`'s `JobTab.tsx` → `components/ui/Markdown.tsx`) — malformed input shows as literal asterisks, garbled line breaks, or raw escaped tags to the candidate, not a parsing error you'd catch first. Both providers' `description` fields are already close to markdown (mixing `**Bold Section**` pseudo-headers with real `#### ATX headers` and `-` bullets, inconsistently per posting) but need normalizing before they go in the payload:
+### If `JOB_SOURCE = "apify"`
+
+| Application field | From Apify/Wellfound result | Notes |
+|---|---|---|
+| `company` | `company.name` | required |
+| `role` | `title` | required — the literal posting title, not `primaryRoleTitle` (Wellfound's internal taxonomy label) |
+| `status` | always `'found'` | the script defaults this, but state it explicitly in the table so the user sees what's about to be written |
+| `jobPostUrl` | `url` | |
+| `jobDescription` | `description`, normalized to clean markdown — see below | **required — never omit this, and the backend enforces it too** (`createWideapplyApplication` 400s with "jobDescription is required."). Wellfound's `description` already arrives as the full posting text (no truncation to work around, unlike Hirebase's default) — if it's genuinely empty or null for a specific posting, `fetch_content` the job's `url` before logging it and use the extracted page text instead; don't log a "found" application with a blank job description when a fallback is available. |
+| `city` | first entry in `locationNames[]`; omit for a fully remote posting with no office locations | check the whole array, not just index 0 — a job can list multiple office locations |
+| `workMode` | derived from `remote` / `remoteConfig.kind` | `remote: true` → `remote`; `remoteConfig.kind: "HYBRID"` → `hybrid`; `remoteConfig.kind: "ONSITE"` (or `remote: false` with no `remoteConfig`) → `onsite` — omit rather than guess if neither field gives a clear read |
+| `salaryRange` | `compensation`, as free text (e.g. `"$110k – $155k"`) | omit if `compensation` is null/empty — don't fabricate a range. Wellfound returns this as a pre-formatted string, not structured min/max, so pass it through rather than attempting a regex split that can misparse an unusual format |
+| `companyType` | no reliable equivalent field | Wellfound is a startup-focused board — most postings would map to `startup`/`scale-up`, but there's no structured field to confirm it per posting (unlike Hirebase's `company_data.type`). Omit rather than guess; `company.companySize` (below) is the one structured signal actually present |
+| `companySize` | `company.companySize`, as free text (e.g. `"SIZE_201_500"` → `"201-500"`) | omit if `company.companySize` is null |
+| `source` | `'Wellfound'` | always set this — it becomes the auto-logged "Found on Wellfound" event on the application |
+| `jobPostedAt` | `liveStartAt` (unix seconds), converted to `YYYY-MM-DD` | same role as the other two providers' `date_posted`/`jobPostedAt` field — the backend uses this to prioritize the daily send queue. Omit entirely if `liveStartAt` is null — don't invent a posting date |
+| `notes` | optional | e.g. why this was flagged a fit, from `candidate-job-matcher-apify`'s output — can also note the stack-match signal from that skill's Output section, or a `company.badges` entry like `Badge:YC-...` if relevant |
+
+**`jobDescription` must be clean markdown, not the provider's raw text verbatim**, regardless of `JOB_SOURCE`. This isn't cosmetic: the candidate-facing board renders this exact field through `react-markdown` with no raw-HTML passthrough and headings downgraded to bold paragraphs (`wideapply-dashboard`'s `JobTab.tsx` → `components/ui/Markdown.tsx`) — malformed input shows as literal asterisks, garbled line breaks, or raw escaped tags to the candidate, not a parsing error you'd catch first. All three providers' `description` fields are already close to markdown (mixing `**Bold Section**` pseudo-headers with real `#### ATX headers` and `-` bullets, inconsistently per posting) but need normalizing before they go in the payload:
 
 - Pick one section-header style and use it throughout — `**Bold Label**` on its own line, since that renderer downgrades real headings (`#`/`##`/`###`/`####`) to the exact same bold-paragraph weight anyway, so there's no visual reason to keep ATX syntax if the source mixed the two.
 - Normalize every bullet marker to `-`.
@@ -122,7 +142,7 @@ This only applies to timeouts specifically. A genuine failure (`ok: false`, no `
 - Never read, cat, or print the contents of `.secrets/wideapply-applications-skill/.env.dev` or `.env.prod`. Only `push-applications.mjs` touches them.
 - Never ask the user to paste the service key into chat, and never type a key into a command yourself.
 - Never skip Step 3's visible table to go straight from search results to a backend write.
-- Never invent `jobPostUrl`, `salaryRange`, `city`, or `companyType` when the search provider (Hirebase or TheirStack) didn't provide the underlying data — omit the field instead.
+- Never invent `jobPostUrl`, `salaryRange`, `city`, or `companyType` when the search provider (Hirebase, TheirStack, or Apify/Wellfound) didn't provide the underlying data — omit the field instead.
 - Never retry a prod write automatically after a failure without the user re-confirming.
 - Never retry any item the script reports as a timeout (`assumedSuccess: true`) — presumed already inserted; retrying risks a duplicate (see above).
 - Never fall back to `push-wideapply-leads`'s key/env folder for this — this skill uses its own scoped key restricted to a different route (see below), and mixing them defeats the point of scoping.
