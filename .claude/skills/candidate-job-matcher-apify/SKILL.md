@@ -1,6 +1,6 @@
 ---
 name: "candidate-job-matcher-apify"
-description: "Apify-backed alternative to candidate-job-matcher / candidate-job-matcher-hirebase: convert a WideApply candidate profile export into Wellfound (formerly AngelList Talent) role/location search URLs, verify each role slug resolves for free via a direct page fetch before spending any Apify credit, run the saswave~wellfound-company-job-scraper actor to pull real postings, then filter client-side for seniority/YOE/freshness/stack-match (Wellfound has no server-side filters beyond the URL's role+location) and skip jobs already shown to this candidate in a prior run. Skews toward startup/VC-backed employers — a complementary source alongside Hirebase/TheirStack, not a full substitute for enterprise-heavy searches. Outputs matching jobs with salary. Triggers: find jobs for this candidate via Apify, wellfound search for <candidate>, use apify instead of hirebase, search wellfound for jobs."
+description: "Apify-backed alternative to candidate-job-matcher / candidate-job-matcher-hirebase: convert a WideApply candidate profile export into Wellfound (formerly AngelList Talent) role/location search URLs (defaulting to the verified united-states location slug), verify each role slug resolves for free via a direct page fetch before spending any Apify credit, run the saswave~wellfound-company-job-scraper actor to pull real postings, then filter client-side for seniority/YOE/freshness (default 48-hour window, Wellfound has no server-side date filter)/stack-match and skip jobs already shown to this candidate in a prior run. Skews toward startup/VC-backed employers — a complementary source alongside Hirebase/TheirStack, not a full substitute for enterprise-heavy searches. Outputs matching jobs with salary. Triggers: find jobs for this candidate via Apify, wellfound search for <candidate>, use apify instead of hirebase, search wellfound for jobs."
 ---
 
 # Candidate Job Matcher (Apify / Wellfound)
@@ -97,26 +97,39 @@ but still re-verify if Wellfound's taxonomy may have changed since 2026-10-17):
 are **not** confirmed and should not be assumed — Wellfound's taxonomy runs on
 full words, verify before using any abbreviation-derived guess.
 
-## Step 3: Location stays out of the search URL by default — filter it client-side, in the cascade below
+## Step 3: Location defaults to the verified `united-states` slug — only drop to title-only on an explicit non-US ask
 
-**Default to a title-only "board search" URL (`https://wellfound.com/role/<slug>`,
-no location segment) even when a verified location slug exists** (user directive,
-2026-10-17). Wellfound's filters are so limited that the right strategy is: cast
-one wide net on title alone, then do every other filter — including location —
-client-side in the cheap-to-expensive cascade in Step 4, rather than trying to
-get location-narrowing to pay for itself server-side. This also sidesteps the
-slug-fragility problem entirely for location: no location slug, no risk of a
-silent redirect to an unfiltered page.
+**Default to the role + `united-states` location combo URL
+(`https://wellfound.com/role/l/<role-slug>/united-states`), not a bare
+title-only URL (changed 2026-10-26, user directive — supersedes the
+2026-10-17 title-only default below).** `united-states` is already a
+confirmed-good slug (see the known-good list below), so this default needs
+no fresh verification fetch and carries none of the slug-fragility risk a
+narrower metro slug would. Every candidate processed through this pipeline
+is targeting US-based roles — pulling and paying for non-US postings (then
+filtering them out client-side in Step 4) is exactly the same real-run waste
+`candidate-job-matcher-hirebase` fixed by defaulting `geo_locations` to
+`"United States"` (confirmed there, candidate Ankush Chandrashekar,
+2026-10-26: an unscoped pull returned 100 raw jobs, only 18 US-based). A
+country-level slug is still a wide net, not a narrow one — it doesn't
+meaningfully undercut the "cast one wide net" reasoning the title-only
+default was built on, it just excludes postings no candidate here can take.
 
-The one exception worth knowing about, documented for completeness rather than as
-the default: Wellfound's search URL *can* combine role + location as
-`https://wellfound.com/role/l/<role-slug>/<location-slug>`, with the same
-free-verification requirement as role slugs (Step 2) — same redirect check, same
-"don't guess a spelling." Known-good location slugs confirmed this way:
-`san-francisco`, `new-york`, `los-angeles`, `boston`, `chicago`, `seattle`,
-`austin`, `denver`, `district-of-columbia`, `united-states`, `india`. Reach for
-this only if a specific run wants to deliberately cut the board-search volume for
-an unusually large metro-only ask — not as a routine step.
+**Drop to the plain title-only URL (`https://wellfound.com/role/<slug>`, no
+location segment) only on an explicit user ask for a non-US or worldwide
+search for that specific run** — that's the one case where scoping to
+`united-states` would wrongly exclude what the run actually wants.
+
+**A specific metro slug is still only for a deliberate, unusually large
+metro-only ask, not a routine default** — same caveat as before, just no
+longer the same caveat for the *country*-level slug, which is now the
+default. Wellfound's search URL can combine role + location as
+`https://wellfound.com/role/l/<role-slug>/<location-slug>` for a metro too,
+with the same free-verification requirement as role slugs (Step 2) — same
+redirect check, same "don't guess a spelling." Known-good location slugs
+confirmed this way: `san-francisco`, `new-york`, `los-angeles`, `boston`,
+`chicago`, `seattle`, `austin`, `denver`, `district-of-columbia`,
+`united-states`, `india`.
 
 **There is no remote-specific location slug, under either approach.**
 `/role/l/<role>/remote` redirects back to the plain `/role/<role>` page (confirmed
@@ -126,15 +139,20 @@ at all. Remote eligibility is always a client-side check (Step 4) on each result
 own `remote` (bool) and `acceptedRemoteLocationNames` (array of countries/regions
 the company will hire remotely from), regardless of which URL shape was used.
 
-## Step 4: Board search first, then a cheapest-to-most-expensive filter cascade — Wellfound has no server-side filters at all beyond title (and, optionally, location)
+## Step 4: Board search first, then a cheapest-to-most-expensive filter cascade — Wellfound has no server-side filters at all beyond title and (now, by default) country
 
-**Pull one broad batch on title alone before any filtering — roughly 400 raw jobs
-is the target** (user directive, 2026-10-17), not an N-scaled pull. The reasoning:
-Wellfound's filters are so limited that trying to search narrowly risks silently
-missing real matches; a wide, cheap-to-acquire batch up front, filtered down in
-stages after the fact, is safer than trying to get precision out of the search
-itself. N (the requested output count) only governs when to stop *reporting*
-accepted jobs later in the cascade, not how big the initial pull is.
+**Pull one broad batch on title + the default `united-states` location
+before any other filtering — roughly 400 raw jobs is the target** (user
+directive, 2026-10-17; location default changed 2026-10-26 per Step 3
+above), not an N-scaled pull. The reasoning: Wellfound's filters are so
+limited that trying to search narrowly on anything beyond title+country
+risks silently missing real matches; a wide, cheap-to-acquire batch up
+front, filtered down in stages after the fact, is safer than trying to get
+more precision out of the search itself. Scoping to `united-states` doesn't
+change this reasoning — it's still a wide, country-level net, just one that
+excludes postings no candidate here can take. N (the requested output
+count) only governs when to stop *reporting* accepted jobs later in the
+cascade, not how big the initial pull is.
 
 **Combine every verified title variant into one actor call's `search_jobs`
 array** rather than one call per variant — Apify bills this actor per **result
@@ -185,14 +203,19 @@ needs the expensive step, without missing anything with potential").
 1. **Freshness, first** — cheapest possible check, a single timestamp compare,
    so it cuts the pool before any text-reading begins. Wellfound has no
    server-side date filter at all (no `days_ago` / `posted_at_max_age_days`
-   equivalent), so this is entirely client-side: convert `liveStartAt` (unix
+   equivalent, unlike the country-level location filter Step 3 now defaults
+   to) — this stage stays entirely client-side out of necessity, not for
+   lack of trying to push it server-side. Convert `liveStartAt` (unix
    seconds) to a date and apply this repo's standard freshness convention —
-   default to a 7-day window (or whatever the user explicitly asked for),
-   widen to 14 only if the surviving pool is thin, and treat 14 days as a hard
-   ceiling, never wider, matching `candidate-job-matcher-hirebase`'s own
-   non-negotiable rule (added 2026-10-05) for the same reason — a stale posting
-   sourced and acted on before anyone notices it's likely closed is a real
-   failure mode, not a hypothetical one.
+   default to a 2-day (48-hour) window (or whatever the user explicitly
+   asked for — changed from a 7-day default 2026-10-26, user directive),
+   never widen it even if the surviving pool is thin (changed 2026-10-26,
+   user directive), and treat 14 days as an absolute ceiling for any
+   user-given window, matching
+   `candidate-job-matcher-hirebase`'s own non-negotiable rule (added
+   2026-10-05) for the same reason — a stale posting sourced and acted on
+   before anyone notices it's likely closed is a real failure mode, not a
+   hypothetical one.
 2. **Title-level check, second** — still cheap (one string field, no full-text
    read): read `title` (the literal posting title, not `primaryRoleTitle` —
    Wellfound's own internal role-taxonomy label can differ from what the posting
@@ -218,12 +241,14 @@ needs the expensive step, without missing anything with potential").
      already arrives as the full posting text (not truncated the way Hirebase's
      default is) — no raw-description flag or extra fetch needed to get the full
      text. Apply the same floor/ceiling from Step 1 either way.
-   - **Location/remote**: if a location-combo URL was used (Step 3's exception
-     case), the pool is already scoped — still sanity-check `locationNames` isn't
-     empty/contradictory. Otherwise (the default title-only pull), check
-     `locationNames` against the candidate's desired location, or, when the
-     requirement is remote, check `remote === true` and, when the candidate needs
-     remote-in-a-specific-country, that country appears in
+   - **Location/remote**: the default `united-states` combo URL (Step 3) already
+     scopes the pool to US-tagged postings — still sanity-check `locationNames`
+     isn't empty/contradictory, but there's no further country-level work to do
+     here. Only when the run fell back to a plain title-only pull (an explicit
+     non-US ask) does this sub-step need to actively check `locationNames`
+     against the candidate's desired location from scratch. Separately, when
+     the requirement is remote, check `remote === true` and, when the candidate
+     needs remote-in-a-specific-country, that country appears in
      `acceptedRemoteLocationNames`. **Treat an empty or missing
      `acceptedRemoteLocationNames` on a `remote: true` job as unstated, not as
      "open to anywhere"** — flag it rather than silently accepting or rejecting,
@@ -323,10 +348,11 @@ Same table shape as the other two matcher skills:
 |---|---|---|---|---|---|---|---|
 
 Above it: computed seniority target + YOE (Step 1), which title variants were
-verified/used and which were dropped as not-a-real-slug (Step 2), whether a
-location slug was used or the search fell back to role-only + client-side
-location filtering (Step 3), the `max_page` used and whether a retry happened, N
-vs. delivered, and the stop reason. Below it, same disclosure list the other two
+verified/used and which were dropped as not-a-real-slug (Step 2), whether the
+default `united-states` location combo was used, a different metro slug, or the
+search fell back to role-only (an explicit non-US ask) plus client-side location
+filtering (Step 3), the `max_page` used and whether a retry happened, N vs.
+delivered, and the stop reason. Below it, same disclosure list the other two
 matcher skills use: profile-derived vs. explicit-instruction filters; dedup cache
 stats (jobs dropped as already-seen); YOE drops broken out over-ceiling vs.
 under-floor vs. unstated-and-regex-extracted vs. unstated-and-unparseable;
@@ -341,12 +367,17 @@ data gaps.
 ```bash
 # verify a role slug first — free, not the actor (use your own page-fetch tool, e.g. TinyFish fetch_content)
 #   fetch https://wellfound.com/role/<slug> and confirm final_url matches with no redirect
+#   (united-states is already a known-good location slug — no fresh verification needed for it specifically)
 
-# then run the actor with every verified variant batched into one call
+# default: run the actor with every verified title variant + the united-states location default, batched into one call
+echo '{"search_jobs": ["https://wellfound.com/role/l/backend-engineer/united-states", "https://wellfound.com/role/l/software-engineer/united-states"], "max_page": 2}' \
+  | node .claude/skills/candidate-job-matcher-apify/apify-search.mjs --run
+
+# explicit non-US ask: fall back to the plain title-only URL instead
 echo '{"search_jobs": ["https://wellfound.com/role/backend-engineer", "https://wellfound.com/role/software-engineer"], "max_page": 2}' \
   | node .claude/skills/candidate-job-matcher-apify/apify-search.mjs --run
 
-# role + verified location combo
+# role + a specific verified metro, for a deliberate large metro-only ask (not the routine default)
 echo '{"search_jobs": ["https://wellfound.com/role/l/backend-engineer/san-francisco"], "max_page": 1}' \
   | node .claude/skills/candidate-job-matcher-apify/apify-search.mjs --run
 ```
@@ -363,7 +394,18 @@ problem; relay the `error` text to the user rather than retrying blindly.
 
 - Never use a role or location slug in a paid actor call without first verifying
   it via a free page fetch (Step 2/3) — a bad slug silently redirects to a
-  different, unfiltered page rather than erroring.
+  different, unfiltered page rather than erroring. `united-states` is already
+  pre-verified (Step 3) and doesn't need a fresh fetch, but a new or unfamiliar
+  metro slug still does.
+- **Default every search to the role + `united-states` location combo, not a
+  bare title-only URL (changed 2026-10-26, user directive)** — drop to
+  title-only only on an explicit user ask for a non-US or worldwide search for
+  that specific run. Never omit the location segment just to "stay broad": a
+  country-level slug doesn't lose meaningful breadth, it just excludes
+  postings no candidate here can take.
+- **Default freshness is 2 days (48 hours), not 7, and never widened, even if
+  the surviving pool is thin (changed 2026-10-26, user directive)** — report
+  a thin result as thin. 14 remains the absolute ceiling for a user-given window.
 - Never guess at an abbreviation-derived slug (`swe`, `sde`, bare `pm`) — verify
   the full-word form instead; Wellfound's taxonomy runs on full words.
 - There is no remote location slug — never attempt one (`/role/l/<role>/remote`

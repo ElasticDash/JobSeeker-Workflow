@@ -5,7 +5,7 @@
 //   node .claude/skills/fetch-ats-jobs/fetch-ats-jobs.mjs \
 //     --sources .temp/grokbot/sources.csv \
 //     --out .temp/grokbot/fetched_jobs \
-//     --days 7
+//     --days 2
 //
 // Reads a sources.csv (columns: source,kind,platform,url,...) and, for every
 // row whose `kind` is "company" and whose `platform` is one of the ATS
@@ -13,7 +13,28 @@
 // workday), fetches that company's open postings directly from the ATS's own
 // JSON endpoint instead of via the TinyFish/browser investigation the rest of
 // sources.csv records. Keeps only postings first published within the last
-// `--days` days (default 7).
+// `--days` days (default 2 — 48 hours; changed from a 7-day default
+// 2026-10-26, user directive: every job seeker in this pipeline wants the
+// newest postings first by default).
+//
+// No native geo or date filter exists on any of these four APIs — Greenhouse/
+// Ashby/Lever's own JSON endpoints return every open posting for a company
+// (all locations, all ages) with no server-side query parameter to narrow
+// either dimension, so `--days` is always applied by this script client-side
+// after the fact, not a cost-saving lever the way Hirebase's `days_ago` or
+// Apify/Wellfound's `united-states` location slug are (both bill per result
+// returned; these four ATS APIs are free, so there's no credit waste from
+// fetching broadly, only a freshness-filtering step this script already
+// does). Location is not filtered at all here for the same reason — no
+// company-level geo parameter exists on any of these APIs — so a posting
+// from a company's non-US office still comes through; the downstream
+// candidate-job-matcher screening pass (see PROMPTS.md template 2, Step 2)
+// is responsible for dropping non-US postings from this source by hand,
+// since there's no native filter here to default onto. Workday is the one
+// exception that already avoids fetching everything: its own list endpoint
+// is sorted newest-first, so this script stops paginating as soon as a whole
+// page falls outside the `--days` window, rather than walking every posting
+// just to filter client-side afterward.
 //
 // Rows with kind "board" (Work at a Startup, Wellfound, Built In, HiringCafe,
 // ...) or platform "custom" are skipped and reported as such in the summary:
@@ -35,7 +56,7 @@ const SUPPORTED_PLATFORMS = new Set(['greenhouse', 'ashby', 'lever', 'workday'])
 const USER_AGENT = 'Mozilla/5.0 (compatible; JobSeekerWorkflow-fetch-ats-jobs/1.0)';
 
 function parseArgs(argv) {
-    const args = { sources: null, out: null, days: 7, companyConcurrency: 5, workdayDelayMs: 150 };
+    const args = { sources: null, out: null, days: 2, companyConcurrency: 5, workdayDelayMs: 150 };
     for (let i = 0; i < argv.length; i += 1) {
         const a = argv[i];
         if (a === '--sources') args.sources = argv[++i];

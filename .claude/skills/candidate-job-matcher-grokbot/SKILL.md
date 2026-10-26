@@ -1,6 +1,6 @@
 ---
 name: "candidate-job-matcher-grokbot"
-description: "Build a GrokBot-ready job search condition from a WideApply candidate profile export, a CV, and a targeted title: computes the candidate's own seniority and total YOE, expands the target title into same-or-similar variants, derives geography/relocation and other filters, and scopes the search to a fixed ordered list of job boards (startup boards and mixed VC/community boards first, Indeed as a fallback tier). Outputs one provider-agnostic JSON search condition for GrokBot to run. Does not call GrokBot, does not pull or filter results itself; condition-building only. Triggers: build a grokbot search condition, grokbot filter for <candidate>, prep a grokbot query, grokbot search condition from profile and CV."
+description: "Build a GrokBot-ready job search condition from a WideApply candidate profile export, a CV, and a targeted title: computes the candidate's own seniority and total YOE, expands the target title into same-or-similar variants, derives geography/relocation and other filters (countryRestriction defaults to US), and scopes the search to a fixed ordered list of job boards (startup boards and mixed VC/community boards first, Indeed as a fallback tier) with a 2-day/48-hour default freshness window, fixed and never escalated. Outputs one provider-agnostic JSON search condition for GrokBot to run. Does not call GrokBot, does not pull or filter results itself; condition-building only. Triggers: build a grokbot search condition, grokbot filter for <candidate>, prep a grokbot query, grokbot search condition from profile and CV."
 ---
 
 # Candidate Job Matcher (GrokBot condition builder)
@@ -150,14 +150,22 @@ describe):
 
 - `mode`: one of `"remote_and_current_city"` (relocation not allowed, the
   default-safe case), `"open"` (relocation allowed or unstated, no geography
-  restriction beyond the candidate's stated preference), or
-  `"current_city_only"` (candidate explicitly ruled out remote).
+  restriction beyond the candidate's stated preference and the
+  `countryRestriction` default below), or `"current_city_only"` (candidate
+  explicitly ruled out remote).
 - `remote`: whether remote postings are in scope.
 - `currentCity` / `desiredCity`: structured `{city, region, country}` from the
   profile, plain strings, no catalog lookup.
-- `countryRestriction`: an ISO2 code, only when Work Authorization restricts
-  the candidate to one country (e.g. no sponsorship, US-only). This still
-  applies even when `mode` is `"open"`.
+- `countryRestriction`: **defaults to `"US"` on every condition, not just when
+  Work Authorization explicitly restricts the candidate to one country**
+  (changed 2026-10-26, user directive) — every candidate processed through
+  this pipeline is targeting US-based roles, so "no location preference / open
+  to anywhere" in the Desired Job Location section means anywhere in the US,
+  not literally worldwide. This still applies even when `mode` is `"open"`.
+  Only set it to something other than `"US"` when Work Authorization
+  explicitly restricts the candidate to a different single country (or set of
+  countries) instead, or the user explicitly asks for a non-US/worldwide
+  search for that specific run.
 - `relocationAllowed`: boolean, mirrors the gate above.
 - `relocationNote`: one sentence explaining which rule fired and why (quote
   the profile line that triggered it, e.g. "Willing to relocate: No").
@@ -172,7 +180,7 @@ describe):
 | `salary` | Desired salary, only if stated | Never invent a minimum; most postings don't list salary, so leave this unset rather than silently narrowing the market |
 | `companyPreferences.excludeAgencies` | Default `true` | Drop only if the user wants agency postings included |
 | `companyPreferences.excludeCompanies` / `includeCompanies` | Explicit user ask only | Never invent a company list |
-| `searchStrategy.initialFreshnessDays` | User's freshness ask | Defaults to 7 if unstated; see Step 6 for the escalation that builds on this |
+| `searchStrategy.initialFreshnessDays` | User's freshness ask | Defaults to 2 (48 hours) if unstated — changed from a 7-day default 2026-10-26, user directive; see Step 6 (no escalation) |
 
 ## Step 5: Target job boards
 
@@ -221,17 +229,18 @@ to follow, not executed as a loop here.
 
 - `targetJobCount`: the minimum total jobs wanted across all boards. Default
   140 unless the user states a different number for this run.
-- `initialFreshnessDays`: 7, unless the user's freshness ask overrides it.
-- `escalatedFreshnessDays`: 14 — exactly double the initial window, not a
-  user-tunable field on its own; if the user gives a different initial
-  window, escalate to double that instead of hardcoding 14.
-- The rule GrokBot should follow: run the search at `initialFreshnessDays`
-  first. If the total job count across all boards is below
-  `targetJobCount`, re-run once at `escalatedFreshnessDays`. Stop after that
-  second pass regardless of outcome — proceed with whatever was found as
-  soon as `targetJobCount` is met (at either pass) or the
-  `escalatedFreshnessDays` pass completes, whichever happens first. Never
-  escalate past the second pass.
+- `initialFreshnessDays`: 2 (48 hours), unless the user's freshness ask
+  overrides it — changed from a 7-day default 2026-10-26, user directive:
+  every job seeker in this pipeline wants the newest postings first, and a
+  7-day-or-wider default was pulling in postings already stale or already
+  seen in a prior day's run.
+- `freshnessEscalationDays`: **always `[]`, no escalation (changed 2026-10-26,
+  user directive, replaces the old `[7, 14]` ladder).** The window is fixed at
+  `initialFreshnessDays`; a thin result is reported as thin in `notes`, never
+  re-run at a wider window. This holds for the 2-day default and for a
+  user-given `initialFreshnessDays` alike (never above 14).
+- The rule GrokBot should follow: run the search once at
+  `initialFreshnessDays`. Do not re-run at a wider window.
 
 Carry this as a `searchStrategy` object in the condition (see Output below)
 rather than a bare `freshnessDays` number, since a single number can't
@@ -254,8 +263,11 @@ Summary lines (plain text, above the JSON):
 - The relocation rule applied and why.
 - The board tiers included this run, and whether Indeed (Tier 3) is in scope
   for this run or held back until Tiers 1/2 are exhausted.
-- The search strategy's `targetJobCount` and the two freshness windows, and
-  whether any of those were user-overridden this run.
+- The search strategy's `targetJobCount`, `initialFreshnessDays`, and the
+  `freshnessEscalationDays` ladder, and whether any of those were
+  user-overridden this run.
+- The `geography.countryRestriction` applied (defaults to `"US"` now) and
+  why, if it's anything other than the default.
 
 JSON condition, example shape:
 
@@ -300,9 +312,9 @@ JSON condition, example shape:
   },
   "searchStrategy": {
     "targetJobCount": 140,
-    "initialFreshnessDays": 7,
-    "escalatedFreshnessDays": 14,
-    "escalationRule": "Run at initialFreshnessDays first. If total jobs across all boards are below targetJobCount, re-run once at escalatedFreshnessDays. Stop after that second pass regardless of outcome — proceed with whatever was found once targetJobCount is met or the escalatedFreshnessDays pass completes, whichever comes first. Never escalate past this second pass."
+    "initialFreshnessDays": 2,
+    "freshnessEscalationDays": [],
+    "escalationRule": "Run once at initialFreshnessDays. Never re-run at a wider window, even if total jobs are below targetJobCount; report the shortfall."
   },
   "jobBoards": [
     {"url": "workatastartup.com", "target": "startup", "tier": 1},
@@ -346,10 +358,19 @@ reshaping the object per run.
   condition. The Step 6 freshness-escalation policy is a declarative
   instruction carried inside the condition for GrokBot to execute, not a
   loop this skill runs itself.
-- Never escalate the freshness window past the single `escalatedFreshnessDays`
-  step (double the initial window), and never lower `targetJobCount` to make
-  a thin first pass look sufficient, state the actual outcome in `notes`
-  instead.
+- Never escalate the freshness window at all (`freshnessEscalationDays` is
+  always `[]`), and never exceed 14 days under any path, and never lower
+  `targetJobCount` to make a thin first pass look sufficient, state the
+  actual outcome in `notes` instead.
+- **Default `countryRestriction` to `"US"` on every condition, not just when
+  Work Authorization explicitly restricts to one country** (changed
+  2026-10-26, user directive) — "no location preference" means anywhere in
+  the US here, not anywhere worldwide. Only deviate on an explicit Work
+  Authorization restriction to a different country, or an explicit user ask
+  for a non-US/worldwide search.
+- **Default `initialFreshnessDays` to 2 (48 hours), not 7** (changed
+  2026-10-26, user directive), with `freshnessEscalationDays: []` (no
+  escalation, also when the user gives their own `initialFreshnessDays`).
 - Never override an explicit "Willing to relocate: No" with an "open to
   anywhere" location-preference line elsewhere in the profile, the relocation
   gate in Step 3 always wins for that candidate.

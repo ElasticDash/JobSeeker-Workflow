@@ -293,7 +293,7 @@ CV: .temp/Agrima_Jain_Resume_Parallel_Systems_Full_Stack_SWE.docx
 | `{{profile_text_or_file}}` | yes if available | Same shape `candidate-job-matcher` needs; primary source for YOE, Desired Job Location, Work Authorization, Skills. |
 | `{{cv_path}}` | yes if no profile export | Used as a fallback or cross-check source for titles, experience dates, and skills. If both are given and disagree, the skill flags it and prefers the profile export. |
 
-Optional, append to the prompt if relevant: a freshness window ("jobs posted in the last 7 days"), a request to exclude recruiting agencies, or an explicit company include/exclude list. Without these the skill applies its own defaults and says so in the output notes.
+Optional, append to the prompt if relevant: a freshness window ("jobs posted in the last 48 hours" — the skill's own default as of 2026-10-26, so only needed to ask for something different), a request to exclude recruiting agencies, or an explicit company include/exclude list. Without these the skill applies its own defaults and says so in the output notes.
 
 The job board list itself (startup boards first, mixed boards next, Indeed
 as fallback) is fixed in the skill, not something this template needs to

@@ -1,6 +1,6 @@
 ---
 name: "candidate-job-matcher-hirebase"
-description: "Hirebase-backed alternative to candidate-job-matcher: convert a WideApply candidate profile export into a Hirebase job_titles/keywords/yoe/geo_locations search (keywords always carries the candidate's full skills list, sorted by relevance so skill-matching jobs surface on page 1), size it with a free page:999 overfetch call (days_ago 7, widening to 14 if thin) then pull-and-filter up to two limit:100 pages (capped at 200 raw jobs) until a requested job count N is met or the search is exhausted, and skip jobs already shown to this candidate in a prior run. Outputs matching jobs with salary. Triggers: find jobs for this candidate via Hirebase, hirebase search for <candidate>, use hirebase instead of theirstack."
+description: "Hirebase-backed alternative to candidate-job-matcher: convert a WideApply candidate profile export into a Hirebase job_titles/keywords/yoe/geo_locations search (keywords always carries the candidate's full skills list, sorted by relevance so skill-matching jobs surface on page 1; geo_locations defaults to United States on every call), size it with a free page:999 overfetch call (days_ago 2, fixed, never widened) then pull-and-filter up to two limit:100 pages (capped at 200 raw jobs) until a requested job count N is met or the search is exhausted, and skip jobs already shown to this candidate in a prior run. Outputs matching jobs with salary. Triggers: find jobs for this candidate via Hirebase, hirebase search for <candidate>, use hirebase instead of theirstack."
 ---
 
 # Candidate Job Matcher (Hirebase)
@@ -91,12 +91,14 @@ belongs, not the inclusion list.
 | `yoe` | `{min, max}` from Step 1 | **This replaces candidate-job-matcher's entire client-side regex/description-parsing step.** Hirebase parses years-of-experience server-side into each job's `yoe_range` and filters on it directly — set `min` to the floor and `max` to the ceiling (Step 1). No regex pass needed for the single-dimension case. |
 | `include_yoe` | Always `"true"` | Without this, jobs with no stated YOE may be silently excluded once a `yoe` filter is set — same "don't silently drop unknowns" principle as candidate-job-matcher. Flag jobs with a `null` `yoe_range` in the output as "requirement unstated," don't let them look like a confirmed match. |
 | `experience` | Step 1's label, mapped per the table above | Coarse pre-filter only — see above. |
-| `geo_locations` | Desired Job Location section | `[{city, region, country}]` — plain strings, no catalog ID lookup needed (unlike TheirStack's `job_location_or`). A job matches if **any** of its own `locations` entries fits, so don't assume `locations[0]` is the match. |
+| `geo_locations` | Desired Job Location section | **Default to `[{"country": "United States"}]` on every call, even with no stated location preference (changed 2026-10-26, user directive)** — "open to anywhere" means anywhere in the US, not literally worldwide; every candidate in this pipeline is a US job seeker. `[{city, region, country}]` — plain strings, no catalog ID lookup needed (unlike TheirStack's `job_location_or`). A job matches if **any** of its own `locations` entries fits, so don't assume `locations[0]` is the match. Narrow further (to a specific city) only per the relocation gate's two-pass rule below. |
 | `location_types` | Workplace arrangement preference | `"Remote"`, `"Hybrid"`, `"In-Person"` (not `"On-site"` — Hirebase's own term is `"In-Person"`). Same rule as candidate-job-matcher: omit if all three are acceptable, that's not a filter. **`"Remote" is global, not US-remote, by itself** (confirmed 2026-10-05 on a real pull: `location_types: ["Remote"]` with no `geo_locations` returned postings actually based in Brazil, Singapore, Australia, Malaysia, and Colombia, all still tagged `location_type: "Remote"`). If the candidate specifically needs a US-based remote role (not just "remote from anywhere"), `location_types: ["Remote"]` alone will not enforce that — pair it with an explicit `geo_locations: [{"country": "..."}]` (or check each job's own `locations[]` for the target country during per-job filtering) rather than trusting `location_type` alone to mean "remote in my country." |
 **A "remote OR local-metro" requirement needs two separate scoped searches, not one unscoped pull filtered by hand afterward** (confirmed 2026-10-05: an orchestrator skipped `geo_locations`/`location_types` entirely on a real pull to "stay broad," then manually filtered location per job after the fact — 166 of 200 raw-job credits on that pull were wasted on jobs a server-side filter would have excluded for free). When the candidate's location preference is "remote, or based in my metro area" — not satisfiable by one Hirebase filter combination, since remote postings and metro-local postings use different `locations[]` shapes — run it as two attempts: (1) `location_types: ["Remote"]` + `geo_locations: [{"country": "..."}]` for remote-in-my-country, (2) `geo_locations: [{"city": "...", "region": "...", "country": "..."}]` with `location_types` omitted for local-metro-any-mode. Each still counts toward the per-attempt 200-raw-job cap and the session-level cumulative cap (Rules section below) — this isn't a way around those caps, it's a way to spend the same credit budget on jobs that can actually pass instead of ones that can't.
 
+**The same waste mode happens with no location preference at all, not just an unscoped "stay broad" choice — this is now fixed by the `geo_locations` default above, not a judgment call per run (changed 2026-10-26, user directive).** Confirmed on a real run (candidate Ankush Chandrashekar, 2026-10-26): with "no location preference / open to anywhere in the US" and no `geo_locations` set at all, a real pull of 100 raw jobs came back with only 18 US-based — 82 of 100 credits spent on jobs the candidate can't take. Treat `geo_locations: [{"country": "United States"}]` as part of the minimal filter core (see Step 4 below) on every call, whether or not the candidate stated a preference, not an optional add-on to reach for only after a bad pull shows the problem.
+
 | `geofilter_params` | Only if the candidate's desired location is a metro area, not an exact city | Default `mode: "auto"` already does metro-area fuzzy matching (searching "San Francisco" also returns East Bay/South Bay postings) — this is usually what you want for a job seeker and needs no explicit setting. Set `mode: "strict"` only if the user explicitly wants exact-city matches with no fuzz. |
-| `days_ago` | Step 4's sizing algorithm by default (tries `7`, widens to `14` if thin) | Only set an explicit value yourself when the user gives their own freshness window — that overrides and skips the 7/14 default sizing step entirely. |
+| `days_ago` | Step 4's sizing algorithm by default (sizes at `2`, fixed, never widened even if thin — changed from a `2`/`7`/`14` ladder 2026-10-26, user directive) | Only set an explicit value yourself when the user gives their own freshness window — that overrides and skips the default sizing ladder entirely. |
 | `hide_recruiting_agencies` | **Default: omit (never `"true"` by default, corrected 2026-10-04)** | Confirmed on a real run that stacking this on top of the other filters helped collapse a nationwide "software engineer" search down to an implausibly small result set. Only set this to `"true"` if the user explicitly asks to exclude agency postings — don't set it by default the way candidate-job-matcher defaults `company_type: "direct_employer"`, the two aren't equivalent enough to justify the same default here. |
 | `filter_incomplete_jobs` | **Default: omit (never `"true"` by default, corrected 2026-10-04)** | Same correction as `hide_recruiting_agencies` above, same reason — don't stack this on by default. Every Hirebase job already carries `application_link`, so there's no dead-link risk from leaving this unset the way `property_exists_and: ["final_url"]` guards against on TheirStack. Only set `"true"` if the user explicitly asks to exclude incomplete listings. |
 | `salary` / `currency` / `include_no_salary` | Only if candidate stated a desired salary | Same gotcha as candidate-job-matcher: most postings don't list salary, so always pair a `salary` filter with `include_no_salary: "true"` or you silently drop most of the market. |
@@ -140,9 +142,9 @@ trade-off versus TheirStack for repeat runs:
   page, cutting down on how often a real pull needs its second page just to
   find matches. **This drops the "freshest postings first" ordering within
   a page** — a relevance-sorted page can mix job ages in any order — but
-  the absolute staleness ceiling is unaffected: `days_ago` (7, widening to
-  14) still bounds every pull to the same fresh window as before, this
-  change only reorders *within* that window, it doesn't widen it. If
+  the absolute staleness ceiling is unaffected: `days_ago` (2, fixed) still bounds every pull to the same fresh window as
+  before, this change only reorders *within* that window, it doesn't widen
+  it. If
   `lastSeenDatePosted` is set and this run's filters substantially match
   what produced it, the old trick of biasing toward unseen jobs by setting
   `date_posted` to that cutoff **no longer applies** — that only ever made
@@ -165,7 +167,7 @@ trade-off versus TheirStack for repeat runs:
 
 ## Step 4: Size it, then pull-and-filter — overfetch-page sizing, 200-job cap
 
-**Keep the filter minimal — but `keywords` is now part of that minimal core, not an optional extra (changed 2026-10-05).** Build the request with `job_titles`, `yoe`/`include_yoe`, `keywords` (the candidate's full skills list), and `geo_locations`/`location_types` only if the candidate actually has a location constraint. `job_category`, `industry`, `salary`, `visa`, and extra exclusion entries are the ones that actually narrow `total_count` — too many of those at once can return too few or zero jobs even when real matching postings exist. `keywords`' own non-`-` entries don't carry this risk the same way: per Hirebase's docs they're a ranking signal, not a count-narrowing filter (a rare or unmatched phrase still returns partial matches, not zero), so there's no thinness trade-off to weigh for including the full list. If a sizing call below comes back thin, **remove** the least important condition rather than adding a new one to compensate — same instinct as candidate-job-matcher's "loosen the newest filter" rule, just applied by subtraction: strip conditions in reverse order of importance (first `industry`/`job_category` extras, then any `-keywords`/`-job_titles` exclusion entries, last the core `job_titles`/`yoe`/`geo_locations`/`keywords` — those four are what actually keep the search on-target and ranked, so don't drop them without good reason, and don't drop `keywords`' inclusion entries for thinness at all since they don't cause it).
+**Keep the filter minimal — but `keywords` and `geo_locations` are now both part of that minimal core, not optional extras (changed 2026-10-05 for `keywords`, 2026-10-26 for `geo_locations`).** Build the request with `job_titles`, `yoe`/`include_yoe`, `keywords` (the candidate's full skills list), and `geo_locations: [{"country": "United States"}]` on every call regardless of whether the candidate stated a location preference — only `location_types` stays conditional on the candidate actually having a workplace-arrangement constraint. `job_category`, `industry`, `salary`, `visa`, and extra exclusion entries are the ones that actually narrow `total_count` — too many of those at once can return too few or zero jobs even when real matching postings exist. `keywords`' own non-`-` entries don't carry this risk the same way: per Hirebase's docs they're a ranking signal, not a count-narrowing filter (a rare or unmatched phrase still returns partial matches, not zero), so there's no thinness trade-off to weigh for including the full list. `geo_locations` scoped to `"United States"` is a country-wide filter, not a narrow one, so it also doesn't carry a meaningful thinness risk in practice. If a sizing call below comes back thin, **remove** the least important condition rather than adding a new one to compensate — same instinct as candidate-job-matcher's "loosen the newest filter" rule, just applied by subtraction: strip conditions in reverse order of importance (first `industry`/`job_category` extras, then any `-keywords`/`-job_titles` exclusion entries, last the core `job_titles`/`yoe`/`geo_locations`/`keywords` — those four are what actually keep the search on-target, ranked, and scoped to a country the candidate can actually work in, so don't drop them without good reason, and don't drop `keywords`' inclusion entries or the `geo_locations` US default for thinness at all since neither one causes it).
 
 **Size with an overfetch page, not the `estimate` endpoint.** A
 `--endpoint search` call with `"page": 999, "limit": 100` sits far beyond any
@@ -175,30 +177,24 @@ still reporting `total_count`, `company_count`, and `total_pages` in the
 response body:
 
 ```bash
-echo '<filter body, with "page": 999, "limit": 100, "days_ago": 7>' \
+echo '<filter body, with "page": 999, "limit": 100, "days_ago": 2>' \
   | node .claude/skills/candidate-job-matcher-hirebase/hirebase-search.mjs --endpoint search
 ```
 
-1. **First sizing call**: `days_ago: 7`.
-2. **If `total_count < 200`**: retry the sizing call once more with
-   `days_ago: 14` instead of 7, everything else unchanged.
-3. **If the first call already reported `total_count >= 200`**: skip the
-   second call, keep `days_ago: 7`.
-4. Continue with whichever call actually ran last (the `days_ago: 7` call if
-   it already cleared 200, otherwise the `days_ago: 14` call) regardless of
-   what its own `total_count` came out to — don't widen a third time, and
-   don't fall back to the narrower value once the wider one has been tried.
-   If the user already gave an explicit `days_ago`, skip this whole 7/14
-   routine and size with their value directly (still via the same
-   `page: 999, limit: 100` trick).
+1. **First sizing call**: `days_ago: 2` (48 hours — changed from a `7`-day
+   first step 2026-10-26, user directive: every job seeker here wants the
+   newest postings first).
+2. **Never widen.** Whatever `total_count` the `days_ago: 2` call reports,
+   keep `days_ago: 2` for the real pull, even if it is near zero (changed
+   2026-10-26, user directive: the old 2/7/14 ladder is removed). A thin
+   result is reported honestly, not padded with older postings. If the user
+   gave an explicit `days_ago`, size and pull with that value directly (still
+   via the same `page: 999, limit: 100` trick), also never widened.
 
-**`days_ago` is always the first lever, ahead of the minimal-filter rule
-above — widen the date window before touching any other condition**
-(confirmed 2026-10-04 on a real run: dropping `hide_recruiting_agencies`/
-`filter_incomplete_jobs` and restoring `include_yoe: "true"` took one
-filter's `total_count` from 13 to 159 just by fixing those, without touching
-`days_ago` at all — but `days_ago` still moves the number further and costs
-nothing extra to try before reaching for any other lever).
+**`days_ago` is never a lever to widen (changed 2026-10-26, user directive,
+replaces the old "widen the date window first" rule).** When a sizing call
+comes back thin, keep `days_ago` as is and go straight to the minimal-filter
+rule below (or report the thin result), never to a wider date window.
 
 **HARD CEILING: `days_ago` must never exceed 14, under any circumstances**
 (user directive, 2026-10-05, non-negotiable — do not widen past this even
@@ -213,8 +209,8 @@ contacted) before anyone noticed the listings were likely long closed.
 exception. If 14 days isn't enough volume, that's a real signal the market
 for the current filter is genuinely limited right now — report that
 honestly (fewer jobs than the target, not padded) rather than reaching for
-a wider date window to compensate. Once still thin at 14, move to the
-minimal-filter rule below instead.
+a wider date window to compensate. Once thin at the fixed window, move to
+the minimal-filter rule below instead.
 
 If the sizing call itself comes back thin (`total_count` near zero) even
 at the 14-day ceiling, that's when to apply the minimal-filter rule — remove
@@ -278,6 +274,29 @@ don't default to the cap, scale the pull to the target):
      requirement. Apply candidate-job-matcher's multi-dimensional YOE logic
      (Step 1 item 6, its Step 4 "Multi-dimensional YOE requirements" section)
      unchanged for this case only.
+   - **A null `yoe_range` ("requirement unstated") with "Senior" in the title
+     defaults to an implied 5+ years, not a free pass (user directive,
+     2026-10-23).** `include_yoe: "true"` only keeps a null-`yoe_range` job
+     from being silently dropped server-side — it says nothing about whether
+     the candidate actually clears the role's real bar, and the server-side
+     `yoe` filter (Step 2) never got a chance to apply its floor/ceiling to
+     this job at all since it had no range to filter on. A title containing
+     "Senior" (not already Staff/Principal/Director/VP/Head of/Chief, which
+     the exclusion table already treats as its own band) is implicitly
+     asking for more than entry/mid tenure even when the posting never
+     states the number — confirmed on a real run (candidate Ankush
+     Chandrashekar, 2026-10-23, the Apify/Wellfound sibling skill): an
+     Avante "Senior Software Engineer" with no stated YOE was kept as
+     unstated even though the same company's non-senior "Software Engineer"
+     posting, same stack, same day, explicitly stated "3+ years" at a
+     visibly lower salary band. **A number the job's own
+     `description`/`requirements_summary` actually states always wins over
+     this default — read it first; only impute 5 once that read confirms no
+     number is stated.** When it applies, run 5 through the normal
+     floor/ceiling check like any other stated number — drop the job if the
+     candidate's ceiling is below 5, same as if `yoe_range` had come back
+     `{min: 5}` itself. Titles without "Senior" keep the plain
+     "requirement unstated" flag-and-keep behavior.
    - **Stack-match check, regardless of title** (added 2026-10-05, refined
      2026-10-05 — a prior run's handoff reasons showed 4 of 7 stack-mismatch
      handoffs came from postings titled "Full Stack X," not just
@@ -476,20 +495,24 @@ the user can see remaining plan allowance without a separate lookup.
 ## Calling the script
 
 ```bash
-# sizing (try days_ago 7 first) — note: no hide_recruiting_agencies, no filter_incomplete_jobs, default omit both
-echo '{"job_titles": ["Software Engineer", "Backend Engineer", "-senior", "-staff"], "keywords": ["Python", "AWS", "Docker", "..."], "yoe": {"min": 3, "max": 5}, "include_yoe": "true", "location_types": ["Remote"], "days_ago": 7, "page": 999, "limit": 100}' \
+# sizing (try days_ago 2 first — 48 hours, the new default) — note: no hide_recruiting_agencies, no filter_incomplete_jobs, default omit both; geo_locations United States is part of the minimal core now, not conditional
+echo '{"job_titles": ["Software Engineer", "Backend Engineer", "-senior", "-staff"], "keywords": ["Python", "AWS", "Docker", "..."], "yoe": {"min": 3, "max": 5}, "include_yoe": "true", "geo_locations": [{"country": "United States"}], "location_types": ["Remote"], "days_ago": 2, "page": 999, "limit": 100}' \
   | node .claude/skills/candidate-job-matcher-hirebase/hirebase-search.mjs --endpoint search
 
-# if total_count < 200, re-size with days_ago 14 instead (same filter, otherwise unchanged)
-echo '{"job_titles": ["Software Engineer", "Backend Engineer", "-senior", "-staff"], "keywords": ["Python", "AWS", "Docker", "..."], "yoe": {"min": 3, "max": 5}, "include_yoe": "true", "location_types": ["Remote"], "days_ago": 14, "page": 999, "limit": 100}' \
+# if total_count < 60, re-size with days_ago 7 instead (same filter, otherwise unchanged)
+echo '{"job_titles": ["Software Engineer", "Backend Engineer", "-senior", "-staff"], "keywords": ["Python", "AWS", "Docker", "..."], "yoe": {"min": 3, "max": 5}, "include_yoe": "true", "geo_locations": [{"country": "United States"}], "location_types": ["Remote"], "days_ago": 7, "page": 999, "limit": 100}' \
+  | node .claude/skills/candidate-job-matcher-hirebase/hirebase-search.mjs --endpoint search
+
+# if still total_count < 200 at days_ago 7, re-size once more with days_ago 14 (unchanged ceiling rule)
+echo '{"job_titles": ["Software Engineer", "Backend Engineer", "-senior", "-staff"], "keywords": ["Python", "AWS", "Docker", "..."], "yoe": {"min": 3, "max": 5}, "include_yoe": "true", "geo_locations": [{"country": "United States"}], "location_types": ["Remote"], "days_ago": 14, "page": 999, "limit": 100}' \
   | node .claude/skills/candidate-job-matcher-hirebase/hirebase-search.mjs --endpoint search
 
 # pull page 1 (same filter as the winning sizing call, page swapped to 1) — limit scaled to N (min(100, max(20, N*10)), changed 2026-10-09, not a flat 100), sort_by: relevance (changed 2026-10-05, was date_posted) so skill-matching jobs cluster on page 1. Example for N=2: limit=20.
-echo '{"job_titles": [...], "keywords": [...], "yoe": {...}, "days_ago": 7, "page": 1, "limit": 20, "sort_by": "relevance", "sort_order": "desc"}' \
+echo '{"job_titles": [...], "keywords": [...], "yoe": {...}, "geo_locations": [{"country": "United States"}], "days_ago": 2, "page": 1, "limit": 20, "sort_by": "relevance", "sort_order": "desc"}' \
   | node .claude/skills/candidate-job-matcher-hirebase/hirebase-search.mjs --endpoint search
 
 # still short after filtering page 1 and more remain: widen limit toward 100 before reaching for an actual page 2
-echo '{"job_titles": [...], "keywords": [...], "yoe": {...}, "days_ago": 7, "page": 1, "limit": 100, "sort_by": "relevance", "sort_order": "desc"}' \
+echo '{"job_titles": [...], "keywords": [...], "yoe": {...}, "geo_locations": [{"country": "United States"}], "days_ago": 2, "page": 1, "limit": 100, "sort_by": "relevance", "sort_order": "desc"}' \
   | node .claude/skills/candidate-job-matcher-hirebase/hirebase-search.mjs --endpoint search
 ```
 
@@ -506,15 +529,29 @@ exit code on failure, with `billingCode`/`retryAfter`/`error` populated — see
 - Never set a `yoe` filter without `include_yoe: "true"` — same "don't
   silently drop unknowns" rule as candidate-job-matcher's unstated-YOE
   handling.
-- Always size with a free `page: 999, limit: 100` search call (`days_ago: 7`,
-  widening once to `14` only if `total_count < 200`) before pulling a real
-  page — never use the `estimate` endpoint for this, and never skip sizing
-  to go straight to a real pull.
+- Never treat a "Senior"-titled posting's null `yoe_range` as a plain pass
+  — default to an implied 5+ years floor/ceiling check instead, unless the
+  job's own description/requirements_summary states its own number (which
+  always wins). See the Step 4 "Numeric YOE check" item above.
+- Always size with a free `page: 999, limit: 100` search call (`days_ago: 2`, fixed,
+  never widened — changed from a `7`/`14` two-step ladder to a single fixed
+  `2` 2026-10-26, user directive) before pulling
+  a real page — never use the `estimate` endpoint for this, and never skip
+  sizing to go straight to a real pull.
 - **Never set `days_ago` above 14, for any request, regardless of target
   size** (hard ceiling, user directive 2026-10-05, no exceptions).
-- Build the filter minimal first (`job_titles`/`yoe`/`geo_locations` only);
-  if sizing comes back thin, remove the least important condition and
-  re-size — never add conditions to try to fix a thin result.
+- **Always include `geo_locations: [{"country": "United States"}]` on every
+  call, including the sizing call, regardless of whether the candidate
+  stated a location preference** (changed 2026-10-26, user directive) —
+  narrow it further only per the relocation gate's two-pass rule or an
+  explicit non-US ask. Never omit it to "stay broad": that's the exact
+  real-run waste this default replaced (82 of 100 raw-job credits spent on
+  non-US postings, candidate Ankush Chandrashekar, 2026-10-26).
+- Build the filter minimal first (`job_titles`/`yoe`/`geo_locations`/
+  `keywords` only); if sizing comes back thin, remove the least important
+  condition and re-size — never add conditions to try to fix a thin result,
+  and never drop `geo_locations`' US default or `keywords`' full list as
+  the thing to remove, since neither one is what causes thinness.
 - Never exceed 2 real pull pages (`limit: 100` each) or 200 raw jobs pulled
   in a single search attempt (one `job_titles`/filter combination).
 - **Scale the first real pull's `limit` to the target `N`, never default to
@@ -551,9 +588,14 @@ exit code on failure, with `billingCode`/`retryAfter`/`error` populated — see
   pull with `sort_by: "relevance"` — never silently fall back to
   `date_posted` sort or an empty/trimmed `keywords` array, since that's what
   was specifically changed to get skill-matching jobs onto page 1 instead of
-  requiring a second-page pull to find them. `days_ago` (7, capped at 14)
-  still bounds freshness independently of this — don't conflate "sorted by
-  relevance" with "no freshness floor," the two are unrelated.
+  requiring a second-page pull to find them. `days_ago` (default 2, fixed, never widened) still bounds freshness independently
+  of this — don't conflate "sorted by relevance" with "no freshness floor,"
+  the two are unrelated.
+- **(Hirebase-specific, added 2026-10-26)** Always populate `geo_locations`
+  with `[{"country": "United States"}]` on every real pull too, same
+  unconditional treatment as `keywords` above — never omit it because the
+  candidate stated no location preference, since "no preference" means
+  anywhere in the US here, not anywhere on Earth.
 - **(Hirebase-specific)** Never collapse a posting's multiple distinct
   years-of-experience requirements into the single `yoe_range` the API
   returns — that field is one parsed range; a second, differently-scoped
