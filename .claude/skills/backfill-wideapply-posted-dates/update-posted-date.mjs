@@ -2,10 +2,16 @@
 // update-posted-date.mjs
 //
 // Usage:
-//   node update-posted-date.mjs --env dev|prod
+//   node update-posted-date.mjs --env dev|prod [--admin-ed-user-id <id>]
 //   (a JSON array of { applicationId, campaignPurchaseId, jobPostedAt }
 //   objects — ONLY rows the user confirmed in the review table — piped in
 //   via stdin)
+//
+// --admin-ed-user-id (or WIDEAPPLY_ADMIN_ED_USER_ID in the env file below) is
+// required by the backend's requireWideapplyAdmin middleware on every write -
+// it must resolve to a real, active admin account. Without it every PUT 400s
+// with "adminEdUserId is required and must identify a real admin account."
+// See push-document.mjs for the same pattern.
 //
 // Reads ELASTICDASH_BE_BASE_URL and WIDEAPPLY_POSTED_DATE_SERVICE_KEY from
 // <repo>/.secrets/wideapply-posted-date-skill/.env.<env> — a NEW scoped key,
@@ -32,6 +38,7 @@ function parseArgs(argv) {
     const args = {};
     for (let i = 0; i < argv.length; i += 1) {
         if (argv[i] === '--env') args.env = argv[++i];
+        else if (argv[i] === '--admin-ed-user-id') args.adminEdUserId = argv[++i];
     }
     return args;
 }
@@ -59,9 +66,9 @@ async function readStdin() {
 }
 
 async function main() {
-    const { env } = parseArgs(process.argv.slice(2));
+    const { env, adminEdUserId } = parseArgs(process.argv.slice(2));
     if (!env || !['dev', 'prod'].includes(env)) {
-        console.error('Usage: node update-posted-date.mjs --env dev|prod  (array of { applicationId, campaignPurchaseId, jobPostedAt } via stdin)');
+        console.error('Usage: node update-posted-date.mjs --env dev|prod [--admin-ed-user-id <id>]  (array of { applicationId, campaignPurchaseId, jobPostedAt } via stdin)');
         process.exitCode = 1;
         return;
     }
@@ -110,6 +117,8 @@ async function main() {
         return;
     }
 
+    const resolvedAdminEdUserId = adminEdUserId || vars.WIDEAPPLY_ADMIN_ED_USER_ID || '';
+
     const results = [];
     let anyFailed = false;
 
@@ -124,7 +133,7 @@ async function main() {
                     'Content-Type': 'application/json',
                     Authorization: `Bearer ${key}`,
                 },
-                body: JSON.stringify({ jobPostedAt: u.jobPostedAt }),
+                body: JSON.stringify({ jobPostedAt: u.jobPostedAt, adminEdUserId: resolvedAdminEdUserId || undefined }),
             });
         } catch {
             results.push({ index: i, ok: false, applicationId: u.applicationId, error: `Could not reach ${baseUrl}.` });

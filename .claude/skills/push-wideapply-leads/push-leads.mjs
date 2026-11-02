@@ -2,8 +2,14 @@
 // push-leads.mjs
 //
 // Usage:
-//   node push-leads.mjs --env dev|prod --campaign <campaignId> --company "<company name>"
+//   node push-leads.mjs --env dev|prod --campaign <campaignId> --company "<company name>" [--admin-ed-user-id <id>]
 //   (a JSON array of leads is piped in via stdin)
+//
+// --admin-ed-user-id (or WIDEAPPLY_ADMIN_ED_USER_ID in the env file below) is
+// required by the backend's requireWideapplyAdmin middleware on every write -
+// it must resolve to a real, active admin account. Without it the POST 400s
+// with "adminEdUserId is required and must identify a real admin account."
+// See push-document.mjs for the same pattern.
 //
 // Reads ELASTICDASH_BE_BASE_URL and WIDEAPPLY_LEADS_SERVICE_KEY from
 // <repo>/.secrets/wideapply-leads-skill/.env.<env> — inside this repo, but
@@ -26,6 +32,7 @@ function parseArgs(argv) {
         if (argv[i] === '--env') args.env = argv[++i];
         else if (argv[i] === '--campaign') args.campaign = argv[++i];
         else if (argv[i] === '--company') args.company = argv[++i];
+        else if (argv[i] === '--admin-ed-user-id') args.adminEdUserId = argv[++i];
     }
     return args;
 }
@@ -53,9 +60,9 @@ async function readStdin() {
 }
 
 async function main() {
-    const { env, campaign, company } = parseArgs(process.argv.slice(2));
+    const { env, campaign, company, adminEdUserId } = parseArgs(process.argv.slice(2));
     if (!env || !['dev', 'prod'].includes(env)) {
-        console.error('Usage: node push-leads.mjs --env dev|prod --campaign <campaignId> --company "<company name>"  (leads JSON via stdin)');
+        console.error('Usage: node push-leads.mjs --env dev|prod --campaign <campaignId> --company "<company name>" [--admin-ed-user-id <id>]  (leads JSON via stdin)');
         process.exitCode = 1;
         return;
     }
@@ -107,6 +114,8 @@ async function main() {
         return;
     }
 
+    const resolvedAdminEdUserId = adminEdUserId || vars.WIDEAPPLY_ADMIN_ED_USER_ID || '';
+
     const url = `${baseUrl.replace(/\/$/, '')}/api/wideapply/admin/campaigns/${campaign}/leads`;
     let response;
     try {
@@ -116,7 +125,7 @@ async function main() {
                 'Content-Type': 'application/json',
                 Authorization: `Bearer ${key}`,
             },
-            body: JSON.stringify({ leads, company }),
+            body: JSON.stringify({ leads, company, adminEdUserId: resolvedAdminEdUserId || undefined }),
         });
     } catch {
         console.error(`Could not reach ${baseUrl}. Is the ${env} backend up and is this network allowed to reach it?`);

@@ -2,8 +2,14 @@
 // push-applications.mjs
 //
 // Usage:
-//   node push-applications.mjs --env dev|prod --campaign <campaignId>
+//   node push-applications.mjs --env dev|prod --campaign <campaignId> [--admin-ed-user-id <id>]
 //   (a JSON array of application objects is piped in via stdin)
+//
+// --admin-ed-user-id (or WIDEAPPLY_ADMIN_ED_USER_ID in the env file below) is
+// required by the backend's requireWideapplyAdmin middleware on every write -
+// it must resolve to a real, active admin account. Without it every POST
+// 400s with "adminEdUserId is required and must identify a real admin
+// account." See push-document.mjs for the same pattern.
 //
 // Reads ELASTICDASH_BE_BASE_URL and WIDEAPPLY_APPLICATIONS_SERVICE_KEY from
 // <repo>/.secrets/wideapply-applications-skill/.env.<env> — inside this
@@ -22,6 +28,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { blacklistReason } from '../company-blacklist/company-blacklist.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -32,6 +39,7 @@ function parseArgs(argv) {
     for (let i = 0; i < argv.length; i += 1) {
         if (argv[i] === '--env') args.env = argv[++i];
         else if (argv[i] === '--campaign') args.campaign = argv[++i];
+        else if (argv[i] === '--admin-ed-user-id') args.adminEdUserId = argv[++i];
     }
     return args;
 }
@@ -59,9 +67,9 @@ async function readStdin() {
 }
 
 async function main() {
-    const { env, campaign } = parseArgs(process.argv.slice(2));
+    const { env, campaign, adminEdUserId } = parseArgs(process.argv.slice(2));
     if (!env || !['dev', 'prod'].includes(env)) {
-        console.error('Usage: node push-applications.mjs --env dev|prod --campaign <campaignId>  (applications JSON array via stdin)');
+        console.error('Usage: node push-applications.mjs --env dev|prod --campaign <campaignId> [--admin-ed-user-id <id>]  (applications JSON array via stdin)');
         process.exitCode = 1;
         return;
     }
@@ -97,6 +105,21 @@ async function main() {
         }
     }
 
+    // Company blacklist (2026-10-30): never write these, regardless of which
+    // channel sourced them. Skipped and reported, not an abort.
+    const blocked = [];
+    applications = applications.filter((app, i) => {
+        const why = blacklistReason(app);
+        if (why) blocked.push({ index: i, ok: false, company: app.company, role: app.role, error: `Blacklisted company (${why}); not written.` });
+        return !why;
+    });
+    if (blocked.length) console.error(`Blacklist: skipped ${blocked.length} application(s): ${blocked.map((b) => b.company).join(', ')}`);
+    if (applications.length === 0) {
+        console.error('Nothing left to push after blacklist.');
+        process.exitCode = blocked.length ? 0 : 1;
+        return;
+    }
+
     const envFile = join(REPO_ROOT, '.secrets', 'wideapply-applications-skill', `.env.${env}`);
     let vars;
     try {
@@ -115,6 +138,8 @@ async function main() {
         return;
     }
 
+    const resolvedAdminEdUserId = adminEdUserId || vars.WIDEAPPLY_ADMIN_ED_USER_ID || '';
+
     const url = `${baseUrl.replace(/\/$/, '')}/api/wideapply/admin/campaigns/${campaign}/applications`;
     const results = [];
     let anyFailed = false;
@@ -124,7 +149,7 @@ async function main() {
         // the backend itself defaults an omitted status to 'applied', so an
         // explicit default has to be set client-side or every push would
         // silently land as 'applied' instead.
-        const body = { status: 'found', ...app };
+        const body = { status: 'found', ...app, adminEdUserId: resolvedAdminEdUserId || undefined };
 
         let response;
         try {

@@ -1,0 +1,42 @@
+{
+  "_note": "Companies we never source jobs from, on any channel. Matching is on the normalized company name (lowercase, punctuation and legal suffixes stripped): exact alias match, or a prefix match for entries in prefixMatch. Edit this file only; every consumer reads it.",
+  "companies": [
+    {
+      "name": "Amazon",
+      "added": "2026-10-30",
+      "reason": "User directive: never fetch any job from Amazon.",
+      "aliases": [
+        "amazon",
+        "amazon com",
+        "amazon web services",
+        "aws",
+        "amazon development center",
+        "amazon dev center"
+      ],
+      "prefixMatch": [
+        "amazon "
+      ],
+      "urlHosts": [
+        "amazon.jobs",
+        "amazon.com"
+      ]
+    },
+    {
+      "name": "Google",
+      "added": "2026-11-01",
+      "reason": "User directive: never fetch any job from Google.",
+      "aliases": [
+        "google",
+        "google llc",
+        "google inc",
+        "google cloud"
+      ],
+      "prefixMatch": [
+        "google "
+      ],
+      "urlHosts": [
+        "careers.google.com"
+      ]
+    }
+  ]
+}

@@ -472,6 +472,28 @@ full original text for the multi-dimensional YOE read above), `company_data`
 grounding detail for the Output notes and for downstream lead research,
 confirmed present on a real pull, 2026-10-04).
 
+## Post-pull verification: posting page, not Hirebase's fields (added 2026-11-02, user directive)
+
+Two Hirebase fields proved unreliable on real jobs, so neither is trusted on its own. (1) `description` and `requirements_summary` are rewritten summaries: a posting that said "5+ years of experience within an IT environment" came back as "3+ years of experience in software development", and `yoe_range` as `{min: 3}`, so it cleared a 2 to 3 band. (2) `date_posted` is a crawl date on boards that publish no posted date: Delsys (Zoho Recruit) came back as 2026-11-01 while the page said 2026-06-22. On one 36-job pull, 16 jobs were really posted between 2019 and 2026-10-29.
+
+**This now runs automatically inside `hirebase-search.mjs` on every real pull (page 1 and page 2 calls), as long as the call passes `--yoe-ceiling <candidate ceiling>`** (the max years the candidate can claim, 3 for a 3.1-year candidate). The window comes from the request's own `days_ago`. A pull without `--yoe-ceiling` prints `verify.skipped: NOT VERIFIED`; treat those jobs as unverified, never use them, and re-run the verifier on `savedTo`. Sizing calls (`page: 999`, no jobs returned) skip it. To run it by hand on any saved file:
+
+```bash
+node .claude/skills/candidate-job-matcher-hirebase/verify-hirebase-jobs.mjs <saved-results.json> --yoe-ceiling <candidate ceiling> --window-days 2
+```
+
+Run before the stack-match and US/blacklist screens. It fetches each posting page and writes `verified_kept.json`, `needs_render.json` and `verify_dropped.json` (from `hirebase-search.mjs` they are `<stamp>-verified_kept.json` etc. next to the raw file, paths in the `verify.files` field of its output):
+- **Years:** any general years requirement (total, IT, software or professional experience, not tied to one tool) above the ceiling drops the job, read from the page text as well as Hirebase's summary. A years number tied to one skill above the ceiling is not auto-dropped; it appears in `yearsReview` and goes through the paid-Experience-entries-only skill check.
+- **Date:** boards known to publish no real date (zohorecruit, kronos, manatal, plus any board where 80% or more of a batch shares one date) are verified from the page (JSON-LD `datePosted`, Zoho `Date_Opened`, "Posted ..." text). Older than the window plus 1 day of tolerance: dropped. Other boards are checked against the listed date.
+- **`needs_render.json`:** the page is a JS shell or shows no date. Open each with `mcp__tinyfish__fetch_content` (`ttl: 0`). Read the posted date and, if the requirements text is visible, run `node ...verify-hirebase-jobs.mjs --scan-text <file> --yoe-ceiling N`. **If the date or the requirements cannot be read, drop the job**: an undated or unreadable posting cannot be shown to be fresh or within the candidate's years. Expect Kronos (secure*.saashr.com) pages to land here and be dropped, since even a rendered fetch shows only collapsed sections.
+- Only `verified_kept.json` plus the jobs you confirm from `needs_render.json` count toward N. Report the drop counts (years, date, undated) in the output summary.
+
+## Post-receipt US-location screen — mandatory, regardless of the source's own geo filter (added 2026-10-28, user directive)
+
+Every provider's native geo filter has leaked non-US postings on real runs, and some sources (ATS-direct, Wellfound, GrokBot boards) have none. After jobs are received and **before** they count toward N, run every accepted candidate job through the shared screen: `node .claude/skills/us-location-filter/us-location-filter.mjs <saved-results.json>` (or `classifyJob()` from that module). It reads this source's own location fields (locations[]` (city/region/country) and `location_type) and returns `usStatus`: `us` keep; `non-us` **drop, never counts toward N**; `unknown` (bare "Remote", "Hybrid", "N Locations", no location) read the JD's actual work locations and drop unless a US location or explicit US-remote eligibility is stated. A UK/EU/CA/IN-only remote role does not let a US-based candidate work from overseas. Report the non-US drop count in the output summary. Override only on an explicit user ask for a non-US search for that run.
+
+**Company blacklist (added 2026-10-30, user directive):** also drop any job whose company is in `.claude/skills/company-blacklist/blacklist.json` (currently Amazon and Google), via `node .claude/skills/company-blacklist/company-blacklist.mjs <saved-results.json>` or `isBlacklisted()`. Never counts toward N, never seen-cache-bypassed, never pushed. `push-applications.mjs` also enforces it in code as the last line of defense. Add or remove companies only by editing that JSON file.
+
 ## Output
 
 Same table shape as candidate-job-matcher:
@@ -509,11 +531,11 @@ echo '{"job_titles": ["Software Engineer", "Backend Engineer", "-senior", "-staf
 
 # pull page 1 (same filter as the winning sizing call, page swapped to 1) — limit scaled to N (min(100, max(20, N*10)), changed 2026-10-09, not a flat 100), sort_by: relevance (changed 2026-10-05, was date_posted) so skill-matching jobs cluster on page 1. Example for N=2: limit=20.
 echo '{"job_titles": [...], "keywords": [...], "yoe": {...}, "geo_locations": [{"country": "United States"}], "days_ago": 2, "page": 1, "limit": 20, "sort_by": "relevance", "sort_order": "desc"}' \
-  | node .claude/skills/candidate-job-matcher-hirebase/hirebase-search.mjs --endpoint search
+  | node .claude/skills/candidate-job-matcher-hirebase/hirebase-search.mjs --endpoint search --yoe-ceiling <ceiling>
 
 # still short after filtering page 1 and more remain: widen limit toward 100 before reaching for an actual page 2
 echo '{"job_titles": [...], "keywords": [...], "yoe": {...}, "geo_locations": [{"country": "United States"}], "days_ago": 2, "page": 1, "limit": 100, "sort_by": "relevance", "sort_order": "desc"}' \
-  | node .claude/skills/candidate-job-matcher-hirebase/hirebase-search.mjs --endpoint search
+  | node .claude/skills/candidate-job-matcher-hirebase/hirebase-search.mjs --endpoint search --yoe-ceiling <ceiling>
 ```
 
 Run from the repo root. Every call prints one JSON line to stdout; non-zero

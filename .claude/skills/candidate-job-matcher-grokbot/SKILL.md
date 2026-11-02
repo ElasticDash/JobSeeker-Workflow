@@ -246,6 +246,14 @@ Carry this as a `searchStrategy` object in the condition (see Output below)
 rather than a bare `freshnessDays` number, since a single number can't
 express the escalation step.
 
+## Post-receipt US-location screen — mandatory, regardless of the source's own geo filter (added 2026-10-28, user directive)
+
+Every provider's native geo filter has leaked non-US postings on real runs, and some sources (ATS-direct, Wellfound, GrokBot boards) have none. After jobs are received and **before** they count toward N, run every accepted candidate job through the shared screen: `node .claude/skills/us-location-filter/us-location-filter.mjs <saved-results.json>` (or `classifyJob()` from that module). It reads this source's own location fields (the `location` text of each returned job, when GrokBot results come back) and returns `usStatus`: `us` keep; `non-us` **drop, never counts toward N**; `unknown` (bare "Remote", "Hybrid", "N Locations", no location) read the JD's actual work locations and drop unless a US location or explicit US-remote eligibility is stated. A UK/EU/CA/IN-only remote role does not let a US-based candidate work from overseas. Report the non-US drop count in the output summary. Override only on an explicit user ask for a non-US search for that run.
+
+**Company blacklist (added 2026-10-30, user directive):** also drop any job whose company is in `.claude/skills/company-blacklist/blacklist.json` (currently Amazon and Google), via `node .claude/skills/company-blacklist/company-blacklist.mjs <saved-results.json>` or `isBlacklisted()`. Never counts toward N, never seen-cache-bypassed, never pushed. `push-applications.mjs` also enforces it in code as the last line of defense. Add or remove companies only by editing that JSON file.
+
+**Built In URL resolution (added 2026-11-01, user directive).** A job sourced from Built In (any `builtin.com`, `builtinnyc.com`, `builtinsf.com`, `builtinla.com`, `builtinaustin.com`, `builtinboston.com`, `builtinchicago.com`, `builtincolorado.com`, `builtinseattle.com` URL) must never be logged with its Built In URL: Built In blocks applying when it thinks the account does not match the requirements. Instead, search the web with the company name and exact job title (TinyFish `search`, e.g. `"<Company>" "<Title>" careers`) and pick the real application page: the company's own ATS (Greenhouse, Ashby, Lever, Workday, SmartRecruiters, iCIMS and similar) or its own careers site, never another job board or aggregator. Validate it with `fetch_content`: the company matches, the title matches, the posting is still open, and the location is consistent with the Built In listing. Use that URL as `jobPostUrl`, and prefer its fuller description if it has one. If no valid ATS URL is found, drop the job and report it as "Built In only, no ATS URL found"; do not log it with the Built In URL and do not count it toward N.
+
 ## Output
 
 One short summary, then the condition as JSON.

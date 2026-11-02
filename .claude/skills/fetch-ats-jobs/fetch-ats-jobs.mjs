@@ -25,12 +25,14 @@
 // Apify/Wellfound's `united-states` location slug are (both bill per result
 // returned; these four ATS APIs are free, so there's no credit waste from
 // fetching broadly, only a freshness-filtering step this script already
-// does). Location is not filtered at all here for the same reason — no
-// company-level geo parameter exists on any of these APIs — so a posting
-// from a company's non-US office still comes through; the downstream
-// candidate-job-matcher screening pass (see PROMPTS.md template 2, Step 2)
-// is responsible for dropping non-US postings from this source by hand,
-// since there's no native filter here to default onto. Workday is the one
+// does). No server-side geo parameter exists on these APIs either, so
+// location is classified client-side by classifyUsLocation() below (added
+// 2026-10-28 after a real run surfaced UK/EU/CA/IN postings that don't allow
+// overseas remote work): every job gets usStatus "us" | "non-us" | "unknown",
+// "non-us" jobs are dropped by default (--keep-non-us disables that), and
+// "unknown" ones (bare "Remote", "Hybrid", "2 Locations") are kept but flagged
+// so the downstream screening pass must confirm US eligibility from the
+// description. Workday is the one
 // exception that already avoids fetching everything: its own list endpoint
 // is sorted newest-first, so this script stops paginating as soon as a whole
 // page falls outside the `--days` window, rather than walking every posting
@@ -49,6 +51,8 @@
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { isBlacklisted } from '../company-blacklist/company-blacklist.mjs';
+import { classifyUsLocation } from '../us-location-filter/us-location-filter.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -56,13 +60,14 @@ const SUPPORTED_PLATFORMS = new Set(['greenhouse', 'ashby', 'lever', 'workday'])
 const USER_AGENT = 'Mozilla/5.0 (compatible; JobSeekerWorkflow-fetch-ats-jobs/1.0)';
 
 function parseArgs(argv) {
-    const args = { sources: null, out: null, days: 2, companyConcurrency: 5, workdayDelayMs: 150 };
+    const args = { sources: null, out: null, days: 2, companyConcurrency: 5, workdayDelayMs: 150, keepNonUs: false };
     for (let i = 0; i < argv.length; i += 1) {
         const a = argv[i];
         if (a === '--sources') args.sources = argv[++i];
         else if (a === '--out') args.out = argv[++i];
         else if (a === '--days') args.days = Number(argv[++i]);
         else if (a === '--concurrency') args.companyConcurrency = Number(argv[++i]);
+        else if (a === '--keep-non-us') args.keepNonUs = true;
         else if (a === '--workday-delay-ms') args.workdayDelayMs = Number(argv[++i]);
     }
     return args;
@@ -219,6 +224,7 @@ async function fetchAshby(slug, cutoff) {
             title: j.title,
             location: j.location ?? null,
             isRemote: j.isRemote ?? null,
+            locationCountry: [j.address?.postalAddress?.addressCountry, ...(j.secondaryLocations || []).map((l) => l.address?.addressCountry ?? l.location)].filter(Boolean).join(' | ') || null,
             postedAt: j.publishedAt,
             url: j.jobUrl,
             descriptionHtml: j.descriptionHtml ?? null,
@@ -238,6 +244,7 @@ async function fetchLever(slug, cutoff) {
             title: j.text,
             location: j.categories?.location ?? null,
             team: j.categories?.team ?? null,
+            locationCountry: [j.country, ...(j.categories?.allLocations || [])].filter(Boolean).join(' | ') || null,
             postedAt: new Date(j.createdAt).toISOString(),
             url: j.hostedUrl,
             descriptionHtml: j.description ?? j.descriptionPlain ?? null,
@@ -386,7 +393,7 @@ async function processRow(row, days, workdayDelayMs) {
 async function main() {
     const args = parseArgs(process.argv.slice(2));
     if (!args.sources) {
-        console.error('Usage: node fetch-ats-jobs.mjs --sources <sources.csv> [--out <dir>] [--days 7] [--concurrency 5]');
+        console.error('Usage: node fetch-ats-jobs.mjs --sources <sources.csv> [--out <dir>] [--days 2] [--concurrency 5] [--keep-non-us]');
         process.exitCode = 1;
         return;
     }
@@ -401,6 +408,35 @@ async function main() {
     console.log(`Loaded ${rows.length} rows from ${sourcesPath}. Fetching postings within ${args.days} days...`);
 
     const results = await runPool(rows, args.companyConcurrency, (row) => processRow(row, args.days, args.workdayDelayMs));
+
+    // Company blacklist (2026-10-30): drop blacklisted employers outright.
+    let droppedBlacklisted = 0;
+    for (const r of results) {
+        if (r.skipped) continue;
+        const before = r.jobs.length;
+        r.jobs = r.jobs.filter((j) => !isBlacklisted(j));
+        droppedBlacklisted += before - r.jobs.length;
+        r.jobsInWindow = r.jobs.length;
+    }
+    if (droppedBlacklisted) console.log(`Blacklist: ${droppedBlacklisted} posting(s) from blacklisted companies dropped.`);
+
+    // Classify every job's location; drop non-US unless --keep-non-us.
+    let droppedNonUs = 0;
+    let unknownUs = 0;
+    for (const r of results) {
+        if (r.skipped) continue;
+        for (const j of r.jobs) {
+            j.usStatus = classifyUsLocation(j.location, j.locationCountry, j.remoteType);
+            if (j.usStatus === 'unknown') unknownUs += 1;
+        }
+        if (!args.keepNonUs) {
+            const before = r.jobs.length;
+            r.jobs = r.jobs.filter((j) => j.usStatus !== 'non-us');
+            droppedNonUs += before - r.jobs.length;
+            r.jobsInWindow = r.jobs.length;
+        }
+    }
+    console.log(`Location screen: ${droppedNonUs} non-US postings dropped${args.keepNonUs ? ' (skipped, --keep-non-us)' : ''}; ${unknownUs} kept as usStatus "unknown" (need JD-level US check).`);
 
     const summary = [];
     const allJobs = [];

@@ -340,6 +340,12 @@ either — same trade-off as `candidate-job-matcher-hirebase` versus TheirStack.
   regardless of whether it turns out to be a dup you'd already shown).
 - **After the run**: append every job actually shown to `ids` (dedup by `id`).
 
+## Post-receipt US-location screen — mandatory, regardless of the source's own geo filter (added 2026-10-28, user directive)
+
+Every provider's native geo filter has leaked non-US postings on real runs, and some sources (ATS-direct, Wellfound, GrokBot boards) have none. After jobs are received and **before** they count toward N, run every accepted candidate job through the shared screen: `node .claude/skills/us-location-filter/us-location-filter.mjs <saved-results.json>` (or `classifyJob()` from that module). It reads this source's own location fields (locationNames[]`, `remote`/`remoteConfig) and returns `usStatus`: `us` keep; `non-us` **drop, never counts toward N**; `unknown` (bare "Remote", "Hybrid", "N Locations", no location) read the JD's actual work locations and drop unless a US location or explicit US-remote eligibility is stated. A UK/EU/CA/IN-only remote role does not let a US-based candidate work from overseas. Report the non-US drop count in the output summary. Override only on an explicit user ask for a non-US search for that run.
+
+**Company blacklist (added 2026-10-30, user directive):** also drop any job whose company is in `.claude/skills/company-blacklist/blacklist.json` (currently Amazon and Google), via `node .claude/skills/company-blacklist/company-blacklist.mjs <saved-results.json>` or `isBlacklisted()`. Never counts toward N, never seen-cache-bypassed, never pushed. `push-applications.mjs` also enforces it in code as the last line of defense. Add or remove companies only by editing that JSON file.
+
 ## Output
 
 Same table shape as the other two matcher skills:

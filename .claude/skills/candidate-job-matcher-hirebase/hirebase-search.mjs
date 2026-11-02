@@ -22,6 +22,7 @@
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { verifyJobs } from './verify-hirebase-jobs.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const BASE_URL = 'https://api.hirebase.org';
@@ -34,9 +35,10 @@ const ENDPOINTS = {
 };
 
 function parseArgs(argv) {
-    const args = { endpoint: null };
+    const args = { endpoint: null, yoeCeiling: null };
     for (let i = 0; i < argv.length; i += 1) {
         if (argv[i] === '--endpoint') args.endpoint = argv[++i];
+        else if (argv[i] === '--yoe-ceiling') args.yoeCeiling = Number(argv[++i]);
     }
     return args;
 }
@@ -66,7 +68,7 @@ async function readStdin() {
 }
 
 async function main() {
-    const { endpoint } = parseArgs(process.argv.slice(2));
+    const { endpoint, yoeCeiling } = parseArgs(process.argv.slice(2));
     const def = endpoint ? ENDPOINTS[endpoint] : null;
     if (!def) {
         console.error(`Usage: node hirebase-search.mjs --endpoint ${Object.keys(ENDPOINTS).join('|')}  (search/estimate take a JSON filter body via stdin)`);
@@ -148,6 +150,37 @@ async function main() {
         const stamp = new Date().toISOString().replace(/[:.]/g, '-');
         const savedTo = join(dir, `${stamp}-search.json`);
         writeFileSync(savedTo, rawText, 'utf8');
+
+        // Auto-verify every real pull against the posting pages (added
+        // 2026-11-02): Hirebase's description/yoe_range/date_posted are not
+        // trusted on their own. See verify-hirebase-jobs.mjs.
+        let verify;
+        const jobsReturned = parsed?.jobs ?? [];
+        if (jobsReturned.length === 0) {
+            verify = { skipped: 'no jobs returned' };
+        } else if (yoeCeiling == null || Number.isNaN(yoeCeiling)) {
+            verify = { skipped: 'NOT VERIFIED: re-run with --yoe-ceiling <candidate ceiling>, or run verify-hirebase-jobs.mjs on savedTo before using these jobs' };
+        } else {
+            const windowDays = Number(body?.days_ago) || 2;
+            const res = await verifyJobs(jobsReturned, { ceiling: yoeCeiling, windowDays, tolerance: 1, concurrency: 5 });
+            writeFileSync(join(dir, `${stamp}-verified_kept.json`), JSON.stringify(res.kept, null, 2), 'utf8');
+            writeFileSync(join(dir, `${stamp}-needs_render.json`), JSON.stringify(res.needsRender, null, 2), 'utf8');
+            writeFileSync(join(dir, `${stamp}-verify_dropped.json`), JSON.stringify(res.dropped, null, 2), 'utf8');
+            const reason = (p) => res.dropped.filter((d) => d.dropReason.startsWith(p)).length;
+            verify = {
+                kept: res.kept.length,
+                needsRender: res.needsRender.length,
+                dropped: res.dropped.length,
+                droppedYears: reason('years'),
+                droppedDate: reason('date'),
+                files: {
+                    kept: join(dir, `${stamp}-verified_kept.json`),
+                    needsRender: join(dir, `${stamp}-needs_render.json`),
+                    dropped: join(dir, `${stamp}-verify_dropped.json`),
+                },
+                note: 'Use verified_kept only. needs_render jobs need a rendered fetch; drop them if date or requirements still unreadable.',
+            };
+        }
         console.log(JSON.stringify({
             ok: true,
             savedTo,
@@ -157,6 +190,7 @@ async function main() {
             limit: parsed?.limit,
             total_pages: parsed?.total_pages,
             returned: parsed?.jobs?.length ?? 0,
+            verify,
             usage,
         }));
         return;
