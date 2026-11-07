@@ -37,6 +37,32 @@
       "urlHosts": [
         "careers.google.com"
       ]
+    },
+    {
+      "name": "ByteDance",
+      "added": "2026-11-06",
+      "reason": "User directive: never fetch any job from ByteDance.",
+      "aliases": [
+        "bytedance",
+        "byte dance",
+        "bytedance ltd",
+        "bytedance technology",
+        "tiktok",
+        "tiktok usa",
+        "tiktok us",
+        "tiktok shop",
+        "lemon8",
+        "capcut"
+      ],
+      "prefixMatch": [
+        "bytedance ",
+        "tiktok "
+      ],
+      "urlHosts": [
+        "jobs.bytedance.com",
+        "joinbytedance.com",
+        "careers.tiktok.com"
+      ]
     }
   ]
 }

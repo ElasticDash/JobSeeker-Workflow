@@ -212,8 +212,21 @@ export async function verifyJobs(jobs, a) {
             }
         }
 
+        // The page's own posted date beats Hirebase's on every board, not just flagged
+        // ones: Hirebase's date_posted can be later than the real one (crawl or
+        // re-index date), so a listed in-window date proves nothing when the page
+        // says otherwise. Same rule for a Built In job once resolved to its ATS URL.
+        if (hit) {
+            j.verifiedPostedAt = hit.date.toISOString().slice(0, 10);
+            if (now - hit.date.getTime() > maxAgeMs) {
+                j.dateStatus = `verified via ${hit.via}`;
+                j.dropReason = `date: page says posted ${j.verifiedPostedAt} (Hirebase said ${j.date_posted}), outside ${a.windowDays}d window`;
+                dropped.push(j); return;
+            }
+        }
+
         if (!flagged) {
-            j.dateStatus = 'board-trusted';
+            j.dateStatus = hit ? `verified via ${hit.via}` : 'board-trusted';
             (j.pageReadable ? kept : needsRender).push(j);
             if (!j.pageReadable) j.renderReason = 'page text unreadable: read it with a rendered fetch and run --scan-text';
             return;

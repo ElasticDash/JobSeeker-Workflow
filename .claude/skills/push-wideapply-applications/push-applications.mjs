@@ -29,6 +29,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { blacklistReason } from '../company-blacklist/company-blacklist.mjs';
+import { cleanCompanyWebsite, applicationsWithoutWebsite } from './company-website.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -104,6 +105,21 @@ async function main() {
             return;
         }
     }
+
+    // companyWebsite (2026-11-06): the BE 400s a malformed value and that would fail the whole application, so a
+    // value that is not a plausible company site (LinkedIn, a job board, an ATS host...) is dropped here and reported.
+    const droppedWebsites = [];
+    for (const [i, app] of applications.entries()) {
+        if (app.companyWebsite === undefined || app.companyWebsite === null) continue;
+        const cleaned = cleanCompanyWebsite(app.companyWebsite);
+        if (!cleaned) droppedWebsites.push({ index: i, company: app.company, value: String(app.companyWebsite) });
+        app.companyWebsite = cleaned || undefined;
+    }
+    if (droppedWebsites.length) console.error(`companyWebsite: dropped ${droppedWebsites.length} value(s) that are not a company site: ${droppedWebsites.map((d) => `${d.company} (${d.value})`).join(', ')}`);
+
+    // Visible, never blocking: rows still without a website cannot get a BE-written cover letter (find-company-website).
+    const noWebsite = applicationsWithoutWebsite(applications);
+    if (noWebsite.length) console.error(`companyWebsite: ${noWebsite.length} application(s) still have no company website: ${noWebsite.map((a) => a.company).join(', ')}`);
 
     // Company blacklist (2026-10-30): never write these, regardless of which
     // channel sourced them. Skipped and reported, not an abort.

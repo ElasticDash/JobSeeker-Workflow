@@ -473,3 +473,11 @@ sent as their own separate turn (or run by a separate agent) — don't chain
 straight from "generate the four prompts" into actually running them in
 the same breath; the mapped-table-before-writing checkpoint inside each
 one only means something if a human can still say no first.
+
+## 15. Push AI-filtered jobs for a campaign
+
+Sends the run's `filtered_jobs.json` (jobs the AI rejected on fit, each with a reason) to ElasticDash-BE. The pipeline does this automatically as its last step; use this to re-push or to push after a standalone matcher run.
+
+```
+Push the filtered jobs in {{run_folder}}/filtered_jobs.json to campaign '{{campaign_id}}' on {{env}} using push-filtered-jobs. Report created, updated and rejected counts and any skipped item.
+```

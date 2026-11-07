@@ -23,6 +23,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { verifyJobs } from './verify-hirebase-jobs.mjs';
+import { blacklistReason } from '../company-blacklist/company-blacklist.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const BASE_URL = 'https://api.hirebase.org';
@@ -155,7 +156,15 @@ async function main() {
         // 2026-11-02): Hirebase's description/yoe_range/date_posted are not
         // trusted on their own. See verify-hirebase-jobs.mjs.
         let verify;
-        const jobsReturned = parsed?.jobs ?? [];
+        // Company blacklist enforced in code before verification, so a blacklisted
+        // company (e.g. ByteDance) never reaches the page fetches or the results.
+        const allReturned = parsed?.jobs ?? [];
+        const blacklisted = allReturned.filter((j) => blacklistReason(j));
+        const jobsReturned = allReturned.filter((j) => !blacklistReason(j));
+        if (blacklisted.length) {
+            for (const j of blacklisted) j.blacklistedBy = blacklistReason(j);
+            writeFileSync(join(dir, `${stamp}-blacklist_dropped.json`), JSON.stringify(blacklisted, null, 2), 'utf8');
+        }
         if (jobsReturned.length === 0) {
             verify = { skipped: 'no jobs returned' };
         } else if (yoeCeiling == null || Number.isNaN(yoeCeiling)) {
@@ -190,6 +199,7 @@ async function main() {
             limit: parsed?.limit,
             total_pages: parsed?.total_pages,
             returned: parsed?.jobs?.length ?? 0,
+            blacklistDropped: blacklisted.length,
             verify,
             usage,
         }));

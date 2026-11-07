@@ -42,7 +42,9 @@
 // ...) or platform "custom" are skipped and reported as such in the summary:
 // multi-company boards and bespoke career pages don't expose a uniform JSON
 // API the way Greenhouse/Ashby/Lever/Workday do, so pulling those stays a
-// separate (browser-driven) effort.
+// separate (browser-driven) effort. Any job that a browser-driven Built In pull
+// brings back must be resolved to its real ATS URL by company name + exact title
+// (see push-wideapply-applications "Built In URL resolution") before it is used.
 //
 // Writes one JSON file per company to --out, plus _summary.json/.csv and
 // all_jobs.json (every in-window job across every company, flattened, for a
