@@ -324,6 +324,15 @@ JSON condition, example shape:
     "freshnessEscalationDays": [],
     "escalationRule": "Run once at initialFreshnessDays. Never re-run at a wider window, even if total jobs are below targetJobCount; report the shortfall."
   },
+  "applyLinkStrategy": {
+    "resolveAggregatorJobs": true,
+    "aggregatorHosts": ["builtin.com", "builtinnyc.com", "builtinsf.com", "builtinla.com", "builtinaustin.com", "builtinboston.com", "builtinchicago.com", "builtincolorado.com", "builtinseattle.com"],
+    "rule": "For each job found on an aggregator host, keep only the company name and exact title, search the web for the same posting on the company's own ATS (Greenhouse, Ashby, Lever, Workday, SmartRecruiters, iCIMS and similar) or careers site (never another job board), and verify company, title, still open, and location. Return that page as applyUrl. If none is found, return the job with applyUrl null and applyUrlSource 'none'.",
+    "keepIfNoAlternativeHosts": ["linkedin.com"],
+    "keepRule": "For a job found on a keepIfNoAlternativeHosts host (LinkedIn), run the same company-name plus exact-title search and return the real ATS or careers page as applyUrl when verified; if none exists, keep the job with applyUrl set to the LinkedIn URL and applyUrlSource 'linkedin' (applying on LinkedIn is allowed, unlike Built In).",
+    "dateRule": "Read the posted date from the apply page itself, not the board. Return it as postedAtFromApplyPage. Drop any job whose apply-page date is older than initialFreshnessDays or unreadable.",
+    "returnFields": ["applyUrl", "applyUrlSource", "postedAtFromApplyPage"]
+  },
   "jobBoards": [
     {"url": "workatastartup.com", "target": "startup", "tier": 1},
     {"url": "https://startup.jobs/", "target": "startup", "tier": 1},
@@ -356,6 +365,7 @@ reshaping the object per run.
   set, specialization/tag containment, and disambiguation exclusion list.
   Freehand generation is only for an anchor the table genuinely doesn't
   cover, and that fallback must be stated explicitly, not silent.
+- **`applyLinkStrategy` is mandatory in every condition (added 2026-11-07, user directive).** GrokBot does not read this repo's skills, so the Built In rule has to travel inside the condition it receives. Always emit the object as in the example (LinkedIn goes in `keepIfNoAlternativeHosts`, Built In in `aggregatorHosts`), and keep Wellfound out of `aggregatorHosts` (Prompt 3 covers it). Prompt 4b re-verifies these fields after receipt as a backstop, not as the primary pass.
 - Never silently pick between a profile export and a CV when they disagree,
   say so and prefer the profile export.
 - Never collapse a multi-dimensional YOE requirement (e.g. a separate
