@@ -63,6 +63,23 @@
         "joinbytedance.com",
         "careers.tiktok.com"
       ]
+    },
+    {
+      "name": "Fonzi AI",
+      "added": "2026-11-08",
+      "reason": "User directive: never fetch any job from Fonzi AI.",
+      "aliases": [
+        "fonzi",
+        "fonzi ai",
+        "fonzi ai inc",
+        "fonzi com"
+      ],
+      "prefixMatch": [
+        "fonzi "
+      ],
+      "urlHosts": [
+        "fonzi.ai"
+      ]
     }
   ]
 }

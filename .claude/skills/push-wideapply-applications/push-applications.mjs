@@ -30,6 +30,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { blacklistReason } from '../company-blacklist/company-blacklist.mjs';
 import { cleanCompanyWebsite, applicationsWithoutWebsite } from './company-website.mjs';
+import { reviewJobUrls } from './job-url-platform.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -121,15 +122,29 @@ async function main() {
     const noWebsite = applicationsWithoutWebsite(applications);
     if (noWebsite.length) console.error(`companyWebsite: ${noWebsite.length} application(s) still have no company website: ${noWebsite.map((a) => a.company).join(', ')}`);
 
+    // Job board URLs (AH-504): auto-apply can only drive the employer's ATS. A Built In URL is never logged (user
+    // directive 2026-11-01), so it is skipped and reported. LinkedIn, Wellfound and other boards may still be applied
+    // to, so they are pushed but listed, which keeps a skipped ATS-resolution step visible instead of silent.
+    const urlReview = reviewJobUrls(applications);
+    const refusedBuiltIn = urlReview.refused.map((r) => ({ index: r.index, ok: false, company: r.company, role: r.role, error: 'Built In only, no ATS URL found; not written. Resolve the employer ATS URL first.' }));
+    if (refusedBuiltIn.length) {
+        const drop = new Set(urlReview.refused.map((r) => r.index));
+        applications = applications.filter((_, i) => !drop.has(i));
+        console.error(`jobPostUrl: skipped ${refusedBuiltIn.length} Built In application(s) with no ATS URL: ${urlReview.refused.map((r) => r.company).join(', ')}`);
+    }
+    const onBoardNow = reviewJobUrls(applications).onBoard;
+    if (onBoardNow.length) console.error(`jobPostUrl: ${onBoardNow.length} application(s) still point at a job board, not an employer ATS: ${onBoardNow.map((r) => `${r.company} (${r.platform})`).join(', ')}`);
+    console.error(`jobPostUrl: ${urlReview.counts.employerAts} employer ATS, ${urlReview.counts.board} job board, ${urlReview.counts.unknown} other`);
+
     // Company blacklist (2026-10-30): never write these, regardless of which
     // channel sourced them. Skipped and reported, not an abort.
-    const blocked = [];
+    const blocked = [...refusedBuiltIn];
     applications = applications.filter((app, i) => {
         const why = blacklistReason(app);
         if (why) blocked.push({ index: i, ok: false, company: app.company, role: app.role, error: `Blacklisted company (${why}); not written.` });
         return !why;
     });
-    if (blocked.length) console.error(`Blacklist: skipped ${blocked.length} application(s): ${blocked.map((b) => b.company).join(', ')}`);
+    if (blocked.length) console.error(`Skipped ${blocked.length} application(s) (blacklist or Built In): ${blocked.map((b) => b.company).join(', ')}`);
     if (applications.length === 0) {
         console.error('Nothing left to push after blacklist.');
         process.exitCode = blocked.length ? 0 : 1;
