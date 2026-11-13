@@ -30,7 +30,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { blacklistReason } from '../company-blacklist/company-blacklist.mjs';
 import { cleanCompanyWebsite, applicationsWithoutWebsite } from './company-website.mjs';
-import { reviewJobUrls } from './job-url-platform.mjs';
+import { reviewJobUrls, forcedAtsFor } from './job-url-platform.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -125,6 +125,14 @@ async function main() {
     // Job board URLs (AH-504): auto-apply can only drive the employer's ATS. A Built In URL is never logged (user
     // directive 2026-11-01), so it is skipped and reported. LinkedIn, Wellfound and other boards may still be applied
     // to, so they are pushed but listed, which keeps a skipped ATS-resolution step visible instead of silent.
+    // forcedAts (2026-11-11): kept only when the link host does not already show the ATS (the BE 400s otherwise) and
+    // the value is one the BE accepts; anything else is removed here so one bad value cannot fail the application.
+    for (const app of applications) {
+        if (app.forcedAts === undefined || app.forcedAts === null) continue;
+        const ok = forcedAtsFor(app.forcedAts, app.jobPostUrl);
+        if (!ok) console.error(`forcedAts: dropped "${app.forcedAts}" for ${app.company} (${app.role}): link host already recognised or ATS not forceable.`);
+        app.forcedAts = ok;
+    }
     const urlReview = reviewJobUrls(applications);
     const refusedBuiltIn = urlReview.refused.map((r) => ({ index: r.index, ok: false, company: r.company, role: r.role, error: 'Built In only, no ATS URL found; not written. Resolve the employer ATS URL first.' }));
     if (refusedBuiltIn.length) {

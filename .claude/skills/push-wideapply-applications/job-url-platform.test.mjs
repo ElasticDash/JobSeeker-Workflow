@@ -41,3 +41,15 @@ test('reviewJobUrls separates refused, on-board and counts', () => {
     assert.deepEqual(r.refused.map((x) => x.company), ['B']);
     assert.deepEqual(r.onBoard.map((x) => [x.company, x.platform]), [['C', 'Wellfound']]);
 });
+
+import { forcedAtsFor, isAutoApplySupportedUrl } from './job-url-platform.mjs';
+import { test as t2 } from 'node:test';
+import assert2 from 'node:assert/strict';
+
+t2('forcedAtsFor: set only when the host hides a forceable ATS', () => {
+    assert2.equal(forcedAtsFor('ashby', 'https://cursor.com/careers/software-engineer-bugbot'), 'ashby');
+    assert2.equal(forcedAtsFor('greenhouse', 'https://www.sofi.com/careers/job/8198207003'), 'greenhouse');
+    assert2.equal(forcedAtsFor('ashby', 'https://jobs.ashbyhq.com/mercor/x'), undefined);
+    assert2.equal(forcedAtsFor('lever', 'https://example.com/x'), undefined);
+    assert2.equal(isAutoApplySupportedUrl('https://x.wd1.myworkdayjobs.com/a'), true);
+});

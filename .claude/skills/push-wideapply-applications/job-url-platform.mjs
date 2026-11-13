@@ -25,6 +25,28 @@ const ATS = [
 // Built In has one host per city: builtin.com, builtinnyc.com, builtinsf.com... Matched on the registrable label only.
 const isBuiltInHost = (host) => /(^|\.)builtin[a-z]*\.com$/.test(host);
 
+// Mirrors ElasticDash-BE controller/wideapply/forcedAts.js (hostname only). Keep in step with it.
+const AUTO_APPLY_HOST_NEEDLES = ['myworkdayjobs', 'myworkdaysite', 'greenhouse', 'ashbyhq'];
+export const FORCEABLE_ATS = ['greenhouse', 'ashby', 'workday'];
+
+export function isAutoApplySupportedUrl(value) {
+    try {
+        const host = new URL(String(value ?? '').trim()).hostname.toLowerCase();
+        return AUTO_APPLY_HOST_NEEDLES.some((n) => host.includes(n));
+    } catch {
+        return false;
+    }
+}
+
+// forcedAts for a job whose ATS is known from where it was fetched but whose link host does not show it (Cursor's
+// postings are Ashby but live on cursor.com/careers; SoFi, Pinterest, Dropbox, Stripe embed Greenhouse). The BE 400s a
+// forcedAts on a host it already recognises, so this returns undefined for those.
+export function forcedAtsFor(platform, url) {
+    const p = String(platform ?? '').trim().toLowerCase();
+    if (!FORCEABLE_ATS.includes(p) || !String(url ?? '').trim() || isAutoApplySupportedUrl(url)) return undefined;
+    return p;
+}
+
 export function classifyJobUrl(value) {
     let host;
     try {
@@ -52,7 +74,8 @@ export function reviewJobUrls(applications) {
     const counts = { employerAts: 0, board: 0, unknown: 0 };
     (applications || []).forEach((app, index) => {
         const c = classifyJobUrl(app?.jobPostUrl);
-        if (c.kind === 'employer_ats') counts.employerAts += 1;
+        // an unrecognised host with a valid forcedAts is an employer ATS embedded in a careers site
+        if (c.kind === 'employer_ats' || (c.kind === 'unknown' && forcedAtsFor(app?.forcedAts, app?.jobPostUrl))) counts.employerAts += 1;
         else if (c.kind === 'unknown') counts.unknown += 1;
         else {
             counts.board += 1;

@@ -82,31 +82,6 @@
       ]
     },
     {
-      "name": "JPMorganChase",
-      "added": "2026-11-10",
-      "reason": "User directive: never fetch any job from JPMorganChase.",
-      "aliases": [
-        "jpmorganchase",
-        "jpmorgan chase",
-        "jpmorgan chase co",
-        "jpmorgan chase bank",
-        "jp morgan chase",
-        "jp morgan",
-        "jpmorgan",
-        "jpmc"
-      ],
-      "prefixMatch": [
-        "jpmorgan ",
-        "jpmorganchase ",
-        "jp morgan "
-      ],
-      "urlHosts": [
-        "jpmorganchase.com",
-        "careers.jpmorgan.com",
-        "jpmc.fa.oraclecloud.com"
-      ]
-    },
-    {
       "name": "Investigo",
       "added": "2026-11-10",
       "reason": "User directive: never fetch any job from Investigo (recruitment agency).",
@@ -122,6 +97,85 @@
       "urlHosts": [
         "investigo.co.uk"
       ]
+    },
+    {
+      "name": "Apple",
+      "added": "2026-11-11",
+      "reason": "User directive: never fetch any job from Apple.",
+      "aliases": [
+        "apple",
+        "apple inc",
+        "apple computer",
+        "apple retail",
+        "apple store"
+      ],
+      "prefixMatch": [],
+      "urlHosts": [
+        "jobs.apple.com"
+      ]
+    },
+    {
+      "name": "Microsoft",
+      "added": "2026-11-11",
+      "reason": "User directive: never fetch any job from Microsoft.",
+      "aliases": [
+        "microsoft",
+        "microsoft corp",
+        "microsoft corporation",
+        "microsoft ai",
+        "microsoft research"
+      ],
+      "prefixMatch": [
+        "microsoft "
+      ],
+      "urlHosts": [
+        "careers.microsoft.com",
+        "jobs.careers.microsoft.com",
+        "microsoft.com"
+      ]
+    },
+    {
+      "name": "Switch Tech Talent",
+      "added": "2026-11-11",
+      "reason": "User directive: never fetch any job from Switch Tech Talent (staffing firm).",
+      "aliases": [
+        "switch tech talent",
+        "switch tech"
+      ],
+      "prefixMatch": [
+        "switch tech "
+      ],
+      "urlHosts": []
+    },
+    {
+      "name": "Albert Bow",
+      "added": "2026-11-11",
+      "reason": "User directive: never fetch any job from Albert Bow (recruitment agency).",
+      "aliases": [
+        "albert bow",
+        "albert bow ltd",
+        "albert bow limited"
+      ],
+      "prefixMatch": [
+        "albert bow "
+      ],
+      "urlHosts": []
+    },
+    {
+      "name": "MaxIT Consulting",
+      "added": "2026-11-12",
+      "reason": "User directive: never fetch any job from MaxIT Consulting.",
+      "aliases": [
+        "maxit consulting",
+        "maxit consulting inc",
+        "maxit consulting llc",
+        "max it consulting"
+      ],
+      "prefixMatch": [
+        "maxit consulting ",
+        "max it consulting "
+      ],
+      "urlHosts": []
     }
   ]
 }

@@ -55,6 +55,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { isBlacklisted } from '../company-blacklist/company-blacklist.mjs';
 import { classifyUsLocation } from '../us-location-filter/us-location-filter.mjs';
+import { verifyJobUrls } from './verify-job-urls.mjs';
+import { forcedAtsFor } from '../push-wideapply-applications/job-url-platform.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -70,6 +72,8 @@ function parseArgs(argv) {
         else if (a === '--days') args.days = Number(argv[++i]);
         else if (a === '--concurrency') args.companyConcurrency = Number(argv[++i]);
         else if (a === '--keep-non-us') args.keepNonUs = true;
+        else if (a === '--keep-dead-urls') args.keepDeadUrls = true;
+        else if (a === '--skip-url-check') args.skipUrlCheck = true;
         else if (a === '--workday-delay-ms') args.workdayDelayMs = Number(argv[++i]);
     }
     return args;
@@ -439,6 +443,34 @@ async function main() {
         }
     }
     console.log(`Location screen: ${droppedNonUs} non-US postings dropped${args.keepNonUs ? ' (skipped, --keep-non-us)' : ''}; ${unknownUs} kept as usStatus "unknown" (need JD-level US check).`);
+
+    // Page-level URL check (2026-11-11): the JSON API listing a job does not mean its public page exists.
+    // Dead URLs are dropped (--keep-dead-urls to disable); a company with a known replacement (Cursor) is rewritten.
+    if (!args.skipUrlCheck) {
+        const live = results.filter((r) => !r.skipped).flatMap((r) => r.jobs);
+        const c = await verifyJobUrls(live);
+        const deadJobs = live.filter((j) => j.urlStatus === 'dead');
+        if (!args.keepDeadUrls) {
+            for (const r of results) {
+                if (r.skipped) continue;
+                r.jobs = r.jobs.filter((j) => j.urlStatus !== 'dead');
+                r.jobsInWindow = r.jobs.length;
+            }
+        }
+        writeFileSync(join(outDir, '_dead_urls.json'), JSON.stringify(deadJobs.map((j) => ({ company: j.company, title: j.title, url: j.url })), null, 2), 'utf8');
+        console.log(`URL check: ${c.live} live, ${c.rewritten} rewritten to the company's own careers page, ${c.dead} dead${args.keepDeadUrls ? ' (kept, --keep-dead-urls)' : ' (dropped, see _dead_urls.json)'}, ${c.unverified} unverified (timeout/429/5xx, kept).`);
+    }
+
+    // forcedAts (2026-11-11): the ATS is known from where the job was fetched, even when the final link host (Cursor on
+    // cursor.com/careers, SoFi/Stripe/Pinterest/Dropbox embedding Greenhouse) does not show it. Pass it as `forcedAts`
+    // when creating the application so the BE drives the right flow. Unset when the host already shows the ATS.
+    for (const r of results) {
+        if (r.skipped) continue;
+        for (const j of r.jobs) {
+            const f = forcedAtsFor(j.platform, j.url);
+            if (f) j.forcedAts = f;
+        }
+    }
 
     const summary = [];
     const allJobs = [];
